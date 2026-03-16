@@ -83,32 +83,64 @@ def extract_chart_numbers(sentence: str) -> List[float]:
         if m.start() in exclude_positions:
             continue
 
-        # Skip years (4-digit integers 1900-2099)
+        # ── FIX TYPE_B: Skip years (4-digit integers 1900-2099) ──
         if _YEAR_RANGE[0] <= val <= _YEAR_RANGE[1] and val == int(val):
-            # Keep only if it has explicit value context (%, $, "value", "total")
-            context = sentence[max(0, m.start()-10):m.end()+10].lower()
-            if not any(kw in context for kw in ['%', '$', 'value', 'total', 'average', 'sum']):
+            # Only keep if % or $ is DIRECTLY attached to this number (not nearby)
+            immediate = sentence[max(0, m.start()-2):m.end()+2]
+            if not ('%' in immediate or '$' in immediate):
                 continue
+            # Also skip "2005: 4.2%" — year followed by colon
+            after_colon = sentence[m.end():m.end()+2]
+            if ':' in after_colon:
+                continue
+
+        # ── FIX TYPE_C: Skip fraction components ──
+        # "7/21" or "1/3" → exclude both numerator and denominator
+        before_2 = sentence[max(0, m.start()-1):m.start()]
+        after_1 = sentence[m.end():m.end()+1]
+        # Number followed by /number → numerator of fraction
+        if after_1 == '/' and m.end()+1 < len(sentence) and sentence[m.end()+1:m.end()+2].isdigit():
+            continue
+        # Number preceded by number/ → denominator of fraction
+        if before_2 == '/' and m.start() > 0 and sentence[m.start()-2:m.start()-1].isdigit():
+            continue
 
         # Skip list indices: "1. Lamb", "2. Corn" and similar
         after = sentence[m.end():m.end()+4]
         if val == int(val) and 1 <= val <= 50 and re.match(r'\.\s+[A-Z]', after):
             continue
 
-        # Skip parenthetical numbering: "(1)", "(2)"
+        # Skip parenthetical numbering: "(1)", "(2)" — but NOT in arithmetic like "(9+1)"
         before_char = sentence[m.start()-1:m.start()] if m.start() > 0 else ''
         after_char = sentence[m.end():m.end()+1]
         if before_char == '(' and after_char == ')':
-            continue
+            # Check if it's arithmetic context
+            inner = sentence[m.start()-1:m.end()+1]
+            if not any(op in inner for op in ['+', '-', '*', '/', '×', '÷']):
+                continue
 
-        # Skip counting words: "three countries" → if sentence has "is X" or "are X" for small ints
-        if val == int(val) and 1 <= val <= 10:
-            before_words = sentence[max(0, m.start()-15):m.start()].lower()
-            after_words = sentence[m.end():m.end()+20].lower()
-            # "there are 3 countries" — 3 is a count, not chart value
-            if any(w in before_words for w in ['are ', 'is ', 'has ', 'have ', 'only ']):
-                if any(w in after_words for w in [' item', ' bar', ' color', ' countr', ' categor', ' segment', ' line', ' group']):
-                    continue
+        # ── FIX TYPE_A: Skip counting/quantity numbers ──
+        if val == int(val) and 1 <= val <= 20:
+            before_words = sentence[max(0, m.start()-20):m.start()].lower()
+            after_words = sentence[m.end():m.end()+25].lower()
+
+            # Pattern 1: "are 3 countries", "is 1 color"
+            count_before = any(w in before_words for w in
+                ['are ', 'is ', 'has ', 'have ', 'only ', 'total of ', 'about ',
+                 'exactly ', 'just ', 'number of ', 'count ', 'counted '])
+            count_after = any(w in after_words for w in
+                [' item', ' bar', ' color', ' countr', ' categor', ' segment',
+                 ' line', ' group', ' value', ' point', ' data', ' entri',
+                 ' thing', ' option', ' choice', ' pie', ' slice', ' section'])
+            if count_before and count_after:
+                continue
+
+            # Pattern 2: "that's X items" at end of sentence
+            if any(w in after_words for w in [' items.', ' bars.', ' colors.', ' categories.']):
+                continue
+
+            # Pattern 3: question is "how many" and this number matches the answer context
+            # (Skip for now — would need question text passed in)
 
         chart_nums.append(val)
 
@@ -175,16 +207,32 @@ def gaussian_score(model_val: float, table_val: float, sigma: float = 0.10) -> f
 
 
 def best_table_match(val: float, table_vals: Set[float], sigma: float = 0.10) -> Tuple[float, Optional[float]]:
-    """Find best matching table value. Returns (score, matched_value)."""
+    """Find best matching table value. Also tries val/100 for percentage matching.
+    Returns (score, matched_value)."""
     if not table_vals:
         return 0.0, None
     best_score = 0.0
     best_match = None
+    # Try direct match
     for tv in table_vals:
         s = gaussian_score(val, tv, sigma)
         if s > best_score:
             best_score = s
             best_match = tv
+    # FIX TYPE_D: Also try val/100 (model says "58%" but table has 0.58)
+    if best_score < 0.5 and val > 1:
+        for tv in table_vals:
+            s = gaussian_score(val / 100.0, tv, sigma)
+            if s > best_score:
+                best_score = s
+                best_match = tv
+    # Also try val*100 (model says "0.58" but table has 58)
+    if best_score < 0.5 and val < 1 and val > 0:
+        for tv in table_vals:
+            s = gaussian_score(val * 100.0, tv, sigma)
+            if s > best_score:
+                best_score = s
+                best_match = tv
     return best_score, best_match
 
 
