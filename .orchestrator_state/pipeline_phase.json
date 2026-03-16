@@ -1,0 +1,20 @@
+{
+  "experiment_workflow_1_grpo_data": {
+    "active": false,
+    "workflow_type": "data_modification",
+    "current_step": "COMPLETE",
+    "steps_completed": ["INTENT_CONFIRM", "CODE_IMPL", "CODE_REVIEW", "TRANSFORM", "VERIFY_A", "SAFETY_CHECKS", "DASHBOARD"],
+    "completed_at": "2026-03-15T02:10:00Z"
+  },
+  "experiment_workflow": {
+    "active": false,
+    "workflow_type": "eval_inference",
+    "current_step": "COMPLETE",
+    "steps_completed": ["CODE_IMPL", "CODE_REVIEW", "PREFLIGHT", "VERIFY_B", "VERIFY_C", "DASHBOARD"],
+    "code_review_iteration": 1,
+    "verification_iteration": 0,
+    "metric_verify_iteration": 0,
+    "started_at": "2026-03-15T02:40:00Z",
+    "completed_at": "2026-03-15T03:05:00Z"
+  }
+}

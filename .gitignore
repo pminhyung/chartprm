@@ -1,0 +1,14 @@
+data/
+models/
+checkpoints/
+ckpt/
+results/
+logs/
+__pycache__/
+*.pyc
+core.*
+*.log
+=*
+llama-factory/
+bigcharts-r1/
+__pycache__/
