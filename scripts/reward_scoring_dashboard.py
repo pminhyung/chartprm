@@ -1,8 +1,8 @@
 """
-ChartVCR Reward Scoring Dashboard
+ChartVCR Reward Scoring Dashboard (v5 — audited logic)
 
 Reasoning Chain 분해 → 문장별 평가 → Causal Attribution → 최종 Reward 계산 과정을
-단계별로 시각화하는 Streamlit 대시보드.
+단계별로 시각화. reasoning_chain.py v5 로직 사용.
 
 실행: streamlit run scripts/reward_scoring_dashboard.py --server.port 8503
 """
@@ -10,7 +10,6 @@ import streamlit as st
 import json
 import os
 import re
-import math
 import pandas as pd
 import sys
 
@@ -18,122 +17,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE = os.environ.get("CHARTVR_ROOT", "/ex_disk2/mhpark/poc/chartvr")
 
+# v5 audited logic
+from code.rewards.reasoning_chain import (
+    compute_process_reward,
+    split_reasoning,
+    extract_chart_numbers,
+    best_table_match,
+)
+
 # ═══════════════════════════════════════════════════
-# Reward functions (from train_grpo.py)
+# Full reward analysis using v5 logic
 # ═══════════════════════════════════════════════════
-
-NUM_RE = r'[-+]?\d{1,3}(?:,\d{3})*(?:\.\d+)?'
-CALC_RE = rf'({NUM_RE})\s*([+\-*/×÷])\s*({NUM_RE})\s*[=≈]\s*({NUM_RE})'
-
-
-def get_table_values(csv_path):
-    try:
-        df = pd.read_csv(csv_path)
-        vals = set()
-        for col in df.columns:
-            for v in df[col]:
-                try:
-                    vals.add(float(v))
-                except:
-                    pass
-        return vals, df
-    except:
-        return set(), None
-
-
-def gaussian_score(model_val, table_val, sigma=0.10):
-    if table_val == 0:
-        return 1.0 if abs(model_val) < 0.01 else 0.0
-    return math.exp(-0.5 * (abs(model_val - table_val) / (abs(table_val) * sigma)) ** 2)
-
-
-def analyze_sentence(sent, table_vals, tainted, sigma=0.10):
-    """Analyze a single sentence and return detailed scoring."""
-    nums = []
-    for m in re.findall(NUM_RE, sent):
-        try:
-            nums.append(float(m.replace(',', '')))
-        except:
-            pass
-
-    result = {
-        "text": sent,
-        "numbers": nums,
-        "has_numbers": len(nums) > 0,
-        "input_quality": 1.0,
-        "logic_score": 1.0,
-        "sentence_reward": 0.0,
-        "label": "skip",
-        "details": [],
-    }
-
-    if not nums:
-        result["label"] = "no_numbers"
-        return result
-
-    # Input quality
-    iq_list = []
-    uses_tainted = False
-    for n in nums:
-        if any(abs(n - t) / max(abs(t), 1e-10) < 0.05 for t in tainted):
-            uses_tainted = True
-            iq_list.append(0.3)
-            result["details"].append(f"  ⚠️ {n} is TAINTED (from prior error)")
-        else:
-            best_score = 0.0
-            best_match = None
-            for tv in table_vals:
-                s = gaussian_score(n, tv, sigma)
-                if s > best_score:
-                    best_score = s
-                    best_match = tv
-            iq_list.append(best_score)
-            if best_score > 0.7:
-                result["details"].append(f"  ✅ {n} matches table value {best_match} (score={best_score:.3f})")
-            elif best_score > 0.3:
-                result["details"].append(f"  ⚠️ {n} ~partial match~ {best_match} (score={best_score:.3f})")
-            else:
-                result["details"].append(f"  ❌ {n} NOT in table (best={best_match}, score={best_score:.3f})")
-
-    result["input_quality"] = min(iq_list) if iq_list else 1.0
-
-    # Logic score (arithmetic check)
-    cm = re.search(CALC_RE, sent)
-    if cm:
-        try:
-            a = float(cm.group(1).replace(',', ''))
-            op = cm.group(2).replace('×', '*').replace('÷', '/')
-            b = float(cm.group(3).replace(',', ''))
-            stated = float(cm.group(4).replace(',', ''))
-            if op in '+-*/' and (op != '/' or b != 0):
-                expected = eval(f"{a}{op}{b}")
-                if abs(stated - expected) / max(abs(expected), 1e-10) < 0.05:
-                    result["logic_score"] = 1.0
-                    result["details"].append(f"  ✅ Arithmetic correct: {a}{op}{b} = {stated} (expected {expected:.4f})")
-                else:
-                    result["logic_score"] = 0.0
-                    result["details"].append(f"  ❌ Arithmetic WRONG: {a}{op}{b} = {stated} (expected {expected:.4f})")
-        except:
-            result["logic_score"] = 1.0
-    else:
-        result["details"].append(f"  ℹ️ No explicit arithmetic found")
-
-    # Sentence reward
-    result["sentence_reward"] = result["logic_score"] * result["input_quality"]
-
-    # Label
-    if result["sentence_reward"] < 0.5 and not uses_tainted:
-        result["label"] = "source_error"
-    elif result["sentence_reward"] < 0.5 and uses_tainted:
-        result["label"] = "propagated_error"
-    else:
-        result["label"] = "correct"
-
-    return result
-
 
 def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
-    """Complete ChartVCR reward analysis pipeline."""
+    """Complete ChartVCR reward with v5 reasoning_chain."""
     # 1. Extract answer
     ans_match = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL | re.IGNORECASE)
     extracted_answer = ans_match.group(1).strip() if ans_match else ""
@@ -147,8 +44,7 @@ def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
         g = re.sub(r'[,%$]', '', gold.strip())
         try:
             pf, gf = float(p), float(g)
-            if gf == 0:
-                return abs(pf) < 0.01
+            if gf == 0: return abs(pf) < 0.01
             return abs(pf - gf) / abs(gf) <= 0.05
         except:
             return p.lower() == g.lower()
@@ -157,40 +53,39 @@ def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
 
     # 3. Format reward
     r_fmt = 0.0
-    has_think = '<think>' in response.lower() or 'let' in response.lower()[:50]
-    if has_think:
+    has_reasoning = len(response) > 100
+    if has_reasoning:
         r_fmt += 0.5
-        sentences = [s.strip() for s in response.split('\n') if s.strip() and len(s.strip()) > 5]
+        sentences = split_reasoning(response)
         if len(sentences) >= 3:
             r_fmt += 0.5
     r_fmt = min(r_fmt, 1.0)
 
-    # 4. Process reward (sentence-by-sentence)
-    table_vals = set()
+    # 4. Process reward (v5 audited logic)
+    r_proc, sentence_analyses = compute_process_reward(response, csv_path, sigma)
+
+    # Load table for display
     table_df = None
+    table_vals_list = []
     if csv_path and os.path.exists(csv_path):
-        table_vals, table_df = get_table_values(csv_path)
-
-    # Split reasoning into sentences
-    sentences = [s.strip() for s in response.split('\n') if s.strip() and len(s.strip()) > 5]
-
-    tainted = set()
-    sentence_analyses = []
-    for sent in sentences:
-        analysis = analyze_sentence(sent, table_vals, tainted, sigma)
-        sentence_analyses.append(analysis)
-        # Taint numbers from source errors
-        if analysis["label"] == "source_error":
-            for n in analysis["numbers"]:
-                tainted.add(n)
-
-    # Aggregate process reward
-    valid_rewards = [a["sentence_reward"] for a in sentence_analyses if a["has_numbers"]]
-    r_proc = sum(valid_rewards) / len(valid_rewards) if valid_rewards else 0.0
+        try:
+            table_df = pd.read_csv(csv_path)
+            for col in table_df.columns:
+                for v in table_df[col]:
+                    try: table_vals_list.append(float(v))
+                    except: pass
+        except: pass
 
     # 5. Total reward
     w_acc, w_proc, w_fmt = 0.5, 0.3, 0.2
     total = w_acc * r_acc + w_proc * r_proc + w_fmt * r_fmt
+
+    # Collect tainted
+    tainted = set()
+    for a in sentence_analyses:
+        if a.label == "source_error":
+            for n in a.chart_numbers:
+                tainted.add(n)
 
     return {
         "extracted_answer": extracted_answer,
@@ -201,11 +96,11 @@ def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
         "total_reward": total,
         "weights": {"accuracy": w_acc, "process": w_proc, "format": w_fmt},
         "sentence_analyses": sentence_analyses,
-        "table_values": sorted(table_vals)[:20] if table_vals else [],
+        "table_values": sorted(set(table_vals_list))[:20],
         "table_df": table_df,
         "tainted_numbers": sorted(tainted),
-        "num_sentences": len(sentences),
-        "num_verified": len(valid_rewards),
+        "num_sentences": len(sentence_analyses),
+        "num_verified": sum(1 for a in sentence_analyses if a.label != "skip"),
     }
 
 
@@ -214,20 +109,18 @@ def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
 # ═══════════════════════════════════════════════════
 
 st.set_page_config(page_title="ChartVCR Reward Scoring", layout="wide")
-st.title("🔬 ChartVCR Reward Scoring Dashboard")
+st.title("🔬 ChartVCR Reward Scoring Dashboard (v5)")
 st.markdown("Reasoning Chain 분해 → 문장별 검증 → Causal Attribution → 최종 Reward")
 
-# Load data
+_CALC_RE = r'\d+\.?\d*\s*[+\-*/×÷]\s*\d+\.?\d*\s*[=≈]\s*\d+\.?\d*'
+
 @st.cache_data
 def load_eval_data():
-    results = []
     eval_file = os.path.join(BASE, "results/v4/qwen3vl_zeroshot_chartqa_human.json")
     if os.path.exists(eval_file):
         with open(eval_file) as f:
-            data = json.load(f)
-        for r in data["results"]:
-            results.append(r)
-    return results
+            return json.load(f)["results"]
+    return []
 
 @st.cache_data
 def load_grpo_data():
@@ -240,7 +133,6 @@ def load_grpo_data():
 eval_data = load_eval_data()
 grpo_data = load_grpo_data()
 
-# Build lookup for CSV paths and image paths
 csv_lookup = {}
 img_lookup = {}
 for item in grpo_data:
@@ -251,16 +143,20 @@ for item in grpo_data:
 # Sidebar
 st.sidebar.header("Settings")
 sigma = st.sidebar.slider("σ (Gaussian tolerance)", 0.01, 0.30, 0.10, 0.01)
-filter_type = st.sidebar.radio("Filter", ["All", "Correct only", "Wrong only", "Has computation"])
+filter_type = st.sidebar.radio("Filter", [
+    "All", "Correct only", "Wrong only", "Has computation", "Has CSV"
+])
 
-# Filter samples
 filtered = eval_data
 if filter_type == "Correct only":
     filtered = [r for r in eval_data if r["accuracy"] > 0]
 elif filter_type == "Wrong only":
     filtered = [r for r in eval_data if r["accuracy"] == 0]
 elif filter_type == "Has computation":
-    filtered = [r for r in eval_data if re.search(CALC_RE, r["response"])]
+    filtered = [r for r in eval_data if re.search(_CALC_RE, r["response"])]
+elif filter_type == "Has CSV":
+    filtered = [r for r in eval_data if csv_lookup.get(r["question"], "") and
+                os.path.exists(csv_lookup.get(r["question"], ""))]
 
 st.sidebar.metric("Total samples", len(eval_data))
 st.sidebar.metric("Filtered", len(filtered))
@@ -269,11 +165,20 @@ if not filtered:
     st.warning("No samples found")
     st.stop()
 
-# Sample selector
-idx = st.sidebar.number_input("Sample index", 0, len(filtered) - 1, 0)
-sample = filtered[idx]
+# Navigation
+col_nav1, col_nav2, col_nav3 = st.sidebar.columns(3)
+if "idx" not in st.session_state:
+    st.session_state.idx = 0
+with col_nav1:
+    if st.button("⬅ Prev"):
+        st.session_state.idx = max(0, st.session_state.idx - 1)
+with col_nav3:
+    if st.button("Next ➡"):
+        st.session_state.idx = min(len(filtered) - 1, st.session_state.idx + 1)
+with col_nav2:
+    st.session_state.idx = st.number_input("Index", 0, len(filtered)-1, st.session_state.idx, label_visibility="collapsed")
 
-# Find CSV path and image path
+sample = filtered[st.session_state.idx]
 csv_path = csv_lookup.get(sample["question"], "")
 img_path = img_lookup.get(sample["question"], "")
 
@@ -281,112 +186,106 @@ img_path = img_lookup.get(sample["question"], "")
 analysis = full_reward_analysis(sample["response"], sample["gold_answer"], csv_path, sigma)
 
 # ═══════════════════════════════════════════════════
-# Main display
+# Header metrics
 # ═══════════════════════════════════════════════════
-
-# Header
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("Total Reward", f"{analysis['total_reward']:.3f}")
 with col2:
-    color = "🟢" if analysis["r_accuracy"] > 0 else "🔴"
-    st.metric(f"R_accuracy {color}", f"{analysis['r_accuracy']:.1f}")
+    icon = "🟢" if analysis["r_accuracy"] > 0 else "🔴"
+    st.metric(f"R_accuracy {icon}", f"{analysis['r_accuracy']:.1f}")
 with col3:
     st.metric("R_process", f"{analysis['r_process']:.3f}")
 with col4:
     st.metric("R_format", f"{analysis['r_format']:.1f}")
 
-# Formula
 st.info(
-    f"**Total = {analysis['weights']['accuracy']}×R_acc + {analysis['weights']['process']}×R_proc + {analysis['weights']['format']}×R_fmt**  \n"
-    f"= {analysis['weights']['accuracy']}×{analysis['r_accuracy']:.1f} + "
+    f"**Total = {analysis['weights']['accuracy']}×R_acc + "
+    f"{analysis['weights']['process']}×R_proc + "
+    f"{analysis['weights']['format']}×R_fmt** = "
+    f"{analysis['weights']['accuracy']}×{analysis['r_accuracy']:.1f} + "
     f"{analysis['weights']['process']}×{analysis['r_process']:.3f} + "
-    f"{analysis['weights']['format']}×{analysis['r_format']:.1f} = **{analysis['total_reward']:.3f}**"
+    f"{analysis['weights']['format']}×{analysis['r_format']:.1f} = "
+    f"**{analysis['total_reward']:.3f}**"
 )
 
-# Question & Answer + Chart Image
+# ═══════════════════════════════════════════════════
+# Question + Chart Image
+# ═══════════════════════════════════════════════════
 st.subheader("📋 Question & Answer")
-
 col_img, col_qa = st.columns([1, 1])
 with col_img:
     if img_path and os.path.exists(img_path):
         st.image(img_path, caption="Chart Image", use_container_width=True)
     else:
-        st.info("Chart image not available")
+        st.info("Chart image not available (test set — no matching train image)")
 with col_qa:
     st.markdown(f"**Question:** {sample['question']}")
     st.markdown(f"**Gold Answer:** `{sample['gold_answer']}`")
     match = "✅ CORRECT" if analysis["r_accuracy"] > 0 else "❌ WRONG"
     st.markdown(f"**Extracted:** `{analysis['extracted_answer']}` → {match}")
     st.markdown(f"**Model:** Qwen3-VL-8B-Thinking (zero-shot)")
-    st.markdown(f"**Thinking mode:** vLLM strips `<think>` tags; reasoning is inline text")
+    has_csv = "✅" if csv_path and os.path.exists(csv_path) else "❌"
+    st.markdown(f"**CSV available:** {has_csv}")
 
-# Data Table (if available)
+# Data Table
 if analysis["table_df"] is not None:
     with st.expander("📊 Data Table (CSV)", expanded=False):
         st.dataframe(analysis["table_df"], use_container_width=True)
-        st.caption(f"Table values used for verification: {analysis['table_values'][:15]}...")
+        st.caption(f"Table values: {analysis['table_values'][:15]}...")
 
 # ═══════════════════════════════════════════════════
-# Reasoning Chain Analysis
+# Reasoning Chain (v5 logic)
 # ═══════════════════════════════════════════════════
+st.subheader("🔗 Reasoning Chain — Sentence-by-Sentence (v5)")
+st.caption(f"{analysis['num_sentences']} sentences, {analysis['num_verified']} verified, σ={sigma}")
 
-st.subheader("🔗 Reasoning Chain — Sentence-by-Sentence Analysis")
-
-for i, sa in enumerate(analysis["sentence_analyses"]):
-    if not sa["has_numbers"] and sa["label"] == "no_numbers":
-        # Skip non-numeric sentences (show collapsed)
-        with st.expander(f"Step {i+1}: 💬 Text-only (no numbers)", expanded=False):
-            st.text(sa["text"][:200])
+for sa in analysis["sentence_analyses"]:
+    if sa.label == "skip":
+        with st.expander(f"Step {sa.index+1}: 💬 Text-only (skipped)", expanded=False):
+            st.text(sa.text[:200])
         continue
 
-    # Determine icon
-    if sa["label"] == "correct":
-        icon = "✅"
-        border_color = "green"
-    elif sa["label"] == "source_error":
-        icon = "❌"
-        border_color = "red"
-    elif sa["label"] == "propagated_error":
-        icon = "🔶"
-        border_color = "orange"
-    else:
-        icon = "⬜"
-        border_color = "gray"
+    icons = {"correct": "✅", "source_error": "❌", "propagated_error": "🔶"}
+    icon = icons.get(sa.label, "⬜")
 
     with st.expander(
-        f"Step {i+1}: {icon} {sa['label'].upper()} — "
-        f"logic={sa['logic_score']:.1f} × input_q={sa['input_quality']:.3f} = **{sa['sentence_reward']:.3f}**",
-        expanded=True
+        f"Step {sa.index+1}: {icon} {sa.label.upper()} — "
+        f"logic={sa.logic_score:.1f} × iq={sa.input_quality:.3f} = **{sa.sentence_reward:.3f}**",
+        expanded=(sa.label != "skip")
     ):
-        st.markdown(f"> {sa['text']}")
+        st.markdown(f"> {sa.text}")
 
-        if sa["numbers"]:
-            st.markdown(f"**Numbers found:** {sa['numbers']}")
+        # Show numbers: chart vs filtered
+        if sa.chart_numbers:
+            st.markdown(f"**Chart numbers:** {sa.chart_numbers}")
+        if sa.filtered_numbers:
+            st.caption(f"Filtered out: {sa.filtered_numbers} (years/indices/counts)")
 
-        for detail in sa["details"]:
-            st.markdown(detail)
+        # Details
+        for d in sa.number_details:
+            st.markdown(d)
+        if sa.arithmetic:
+            st.markdown(f"**Arithmetic:** {sa.arithmetic}")
 
-        # Score bar
+        # Score bars
         cols = st.columns(3)
         with cols[0]:
-            st.progress(sa["logic_score"], text=f"Logic: {sa['logic_score']:.2f}")
+            st.progress(sa.logic_score, text=f"Logic: {sa.logic_score:.2f}")
         with cols[1]:
-            st.progress(min(sa["input_quality"], 1.0), text=f"Input Quality: {sa['input_quality']:.3f}")
+            st.progress(min(sa.input_quality, 1.0), text=f"Input Quality: {sa.input_quality:.3f}")
         with cols[2]:
-            st.progress(min(sa["sentence_reward"], 1.0), text=f"Sentence Reward: {sa['sentence_reward']:.3f}")
+            st.progress(min(sa.sentence_reward, 1.0), text=f"Reward: {sa.sentence_reward:.3f}")
 
-# Tainted numbers
+# Tainted
 if analysis["tainted_numbers"]:
-    st.warning(f"🔶 **Tainted numbers** (from source errors, propagated to downstream): {analysis['tainted_numbers']}")
+    st.warning(f"🔶 **Tainted numbers** (propagated from source errors): {analysis['tainted_numbers']}")
 
 # ═══════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════
-
-st.subheader("📊 Reward Breakdown Summary")
-
-summary_data = {
+st.subheader("📊 Reward Breakdown")
+summary = pd.DataFrame({
     "Component": ["R_accuracy", "R_process", "R_format", "**TOTAL**"],
     "Score": [analysis["r_accuracy"], analysis["r_process"], analysis["r_format"], analysis["total_reward"]],
     "Weight": [0.5, 0.3, 0.2, 1.0],
@@ -396,14 +295,8 @@ summary_data = {
         0.2 * analysis["r_format"],
         analysis["total_reward"],
     ],
-}
-st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
-
-st.caption(
-    f"Sentences: {analysis['num_sentences']} total, "
-    f"{analysis['num_verified']} with numbers (verified), "
-    f"σ={sigma}"
-)
+})
+st.dataframe(summary, use_container_width=True, hide_index=True)
 
 # Full response
 with st.expander("📝 Full Model Response", expanded=False):
