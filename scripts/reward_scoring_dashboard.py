@@ -240,11 +240,13 @@ def load_grpo_data():
 eval_data = load_eval_data()
 grpo_data = load_grpo_data()
 
-# Build lookup for CSV paths
+# Build lookup for CSV paths and image paths
 csv_lookup = {}
+img_lookup = {}
 for item in grpo_data:
     q = item.get("problem", "")
     csv_lookup[q] = item.get("csv_path", "")
+    img_lookup[q] = item.get("image", "")
 
 # Sidebar
 st.sidebar.header("Settings")
@@ -271,8 +273,9 @@ if not filtered:
 idx = st.sidebar.number_input("Sample index", 0, len(filtered) - 1, 0)
 sample = filtered[idx]
 
-# Find CSV path
+# Find CSV path and image path
 csv_path = csv_lookup.get(sample["question"], "")
+img_path = img_lookup.get(sample["question"], "")
 
 # Run analysis
 analysis = full_reward_analysis(sample["response"], sample["gold_answer"], csv_path, sigma)
@@ -301,15 +304,22 @@ st.info(
     f"{analysis['weights']['format']}×{analysis['r_format']:.1f} = **{analysis['total_reward']:.3f}**"
 )
 
-# Question & Answer
+# Question & Answer + Chart Image
 st.subheader("📋 Question & Answer")
-st.markdown(f"**Question:** {sample['question']}")
-col_a, col_b = st.columns(2)
-with col_a:
+
+col_img, col_qa = st.columns([1, 1])
+with col_img:
+    if img_path and os.path.exists(img_path):
+        st.image(img_path, caption="Chart Image", use_container_width=True)
+    else:
+        st.info("Chart image not available")
+with col_qa:
+    st.markdown(f"**Question:** {sample['question']}")
     st.markdown(f"**Gold Answer:** `{sample['gold_answer']}`")
-with col_b:
     match = "✅ CORRECT" if analysis["r_accuracy"] > 0 else "❌ WRONG"
     st.markdown(f"**Extracted:** `{analysis['extracted_answer']}` → {match}")
+    st.markdown(f"**Model:** Qwen3-VL-8B-Thinking (zero-shot)")
+    st.markdown(f"**Thinking mode:** vLLM strips `<think>` tags; reasoning is inline text")
 
 # Data Table (if available)
 if analysis["table_df"] is not None:
