@@ -179,67 +179,110 @@ def load_benchmark(name: str):
     return samples
 
 
-def run_inference(model_path: str, samples: list, gpu_ids: str = "0,1,2,3"):
-    """Run inference using vLLM."""
-    from vllm import LLM, SamplingParams
+def run_inference(model_path: str, samples: list, gpu_ids: str = "0,1,2,3",
+                  server_url: str = None, model_id: str = None,
+                  enable_thinking: bool = True, max_concurrent: int = 8):
+    """Run inference via vLLM OpenAI-compatible server.
 
-    num_gpus = len(gpu_ids.split(","))
-    llm = LLM(
-        model=model_path,
-        tensor_parallel_size=num_gpus,
-        gpu_memory_utilization=0.85,
-        max_model_len=8192,
-        trust_remote_code=True,
-    )
+    Args:
+        model_path: Local model path (used as model_id if model_id not set)
+        samples: List of dicts with question, answer, image_path
+        server_url: vLLM server URL (e.g. http://localhost:8000/v1)
+        model_id: Model name on the server
+        enable_thinking: Enable reasoning mode
+        max_concurrent: Max concurrent API requests
+    """
+    import asyncio
+    from openai import AsyncOpenAI
 
-    sampling_params = SamplingParams(temperature=0, max_tokens=2048)
+    if server_url is None:
+        server_url = os.environ.get("VLLM_SERVER_URL", "http://localhost:8000/v1")
+    if model_id is None:
+        model_id = os.environ.get("VLLM_MODEL_ID", model_path)
 
-    chat_inputs = []
-    for sample in samples:
-        img = Image.open(sample["image_path"]).convert("RGB")
-        max_side = max(img.size)
-        if max_side > 1024:
-            scale = 1024 / max_side
-            img = img.resize((int(img.size[0] * scale), int(img.size[1] * scale)), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    client = AsyncOpenAI(base_url=server_url, api_key="dummy")
+    semaphore = asyncio.Semaphore(max_concurrent)
 
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
-                    {"type": "text", "text": EVAL_PROMPT.format(question=sample["question"])},
-                ]
-            }
-        ]
-        chat_inputs.append(messages)
+    async def infer_one(sample, sem):
+        async with sem:
+            img = Image.open(sample["image_path"]).convert("RGB")
+            max_side = max(img.size)
+            if max_side > 1024:
+                scale = 1024 / max_side
+                img = img.resize((int(img.size[0] * scale), int(img.size[1] * scale)), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    outputs = llm.chat(
-        chat_inputs, sampling_params,
-        chat_template_kwargs={"enable_thinking": True},
-    )
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                        {"type": "text", "text": EVAL_PROMPT.format(question=sample["question"])},
+                    ]
+                }
+            ]
+
+            try:
+                extra = {}
+                if enable_thinking:
+                    extra["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+
+                resp = await client.chat.completions.create(
+                    model=model_id,
+                    messages=messages,
+                    max_tokens=2048,
+                    temperature=0.0,
+                    **extra,
+                )
+                content = resp.choices[0].message.content or ""
+                # Get reasoning if available
+                raw_dump = resp.choices[0].message.model_dump() if hasattr(resp.choices[0].message, 'model_dump') else {}
+                reasoning = raw_dump.get("reasoning", "") or ""
+                if reasoning:
+                    full_response = f"<think>{reasoning}</think>\n{content}"
+                else:
+                    full_response = content
+                return {"content": content, "reasoning": reasoning, "response": full_response, "error": None}
+            except Exception as e:
+                return {"content": "", "reasoning": "", "response": "", "error": str(e)}
+
+    async def run_all():
+        sem = asyncio.Semaphore(max_concurrent)
+        tasks = [infer_one(s, sem) for s in samples]
+        return await asyncio.gather(*tasks)
+
+    loop = asyncio.new_event_loop()
+    try:
+        outputs = loop.run_until_complete(run_all())
+    finally:
+        loop.close()
 
     results = []
     for i, output in enumerate(outputs):
-        response = output.outputs[0].text
-        pred = extract_answer(response)
+        # Extract answer from CONTENT only (not reasoning)
+        pred = extract_answer(output["content"]) if not output["error"] else ""
         gold = samples[i]["answer"]
         acc = relaxed_accuracy(pred, gold)
         results.append({
             "question": samples[i]["question"],
             "gold_answer": gold,
             "predicted_answer": pred,
-            "response": response,
+            "response": output["response"],
+            "content": output["content"],
+            "reasoning_content": output["reasoning"],
             "accuracy": acc,
+            "error": output["error"],
         })
 
     return results
 
 
-def evaluate_single(model_name: str, benchmark_name: str, gpu_ids: str):
+def evaluate_single(model_name: str, benchmark_name: str, gpu_ids: str,
+                    server_url: str = None, model_id: str = None,
+                    enable_thinking: bool = True):
     """Evaluate a single model on a single benchmark."""
     print(f"\n{'='*60}")
     print(f"Evaluating {model_name} on {benchmark_name}")
@@ -257,7 +300,11 @@ def evaluate_single(model_name: str, benchmark_name: str, gpu_ids: str):
         print("  No samples found")
         return None
 
-    results = run_inference(model_path, samples, gpu_ids=gpu_ids)
+    results = run_inference(
+        model_path, samples, gpu_ids=gpu_ids,
+        server_url=server_url, model_id=model_id,
+        enable_thinking=enable_thinking,
+    )
 
     if not results:
         print("  No results")
@@ -290,16 +337,27 @@ if __name__ == "__main__":
     parser.add_argument("--benchmark", type=str, default=None)
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--gpu-ids", type=str, default="0,1,2,3")
+    parser.add_argument("--server-url", type=str, default=None,
+                        help="vLLM OpenAI-compatible server URL (e.g. http://localhost:8000/v1)")
+    parser.add_argument("--model-id", type=str, default=None,
+                        help="Model ID on the server")
+    parser.add_argument("--enable-thinking", action="store_true", default=True)
+    parser.add_argument("--no-thinking", action="store_true")
     args = parser.parse_args()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
+    enable_thinking = not args.no_thinking
+
+    if not args.server_url:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
 
     if args.all:
         all_results = {}
         for model_name in MODELS:
             all_results[model_name] = {}
             for bench_name in BENCHMARKS:
-                acc = evaluate_single(model_name, bench_name, args.gpu_ids)
+                acc = evaluate_single(model_name, bench_name, args.gpu_ids,
+                                      server_url=args.server_url, model_id=args.model_id,
+                                      enable_thinking=enable_thinking)
                 if acc is not None:
                     all_results[model_name][bench_name] = acc
         # Print summary
@@ -313,6 +371,8 @@ if __name__ == "__main__":
                 row += f" | {f'{a:.2%}':>8}" if a is not None else f" | {'N/A':>8}"
             print(row)
     elif args.model and args.benchmark:
-        evaluate_single(args.model, args.benchmark, args.gpu_ids)
+        evaluate_single(args.model, args.benchmark, args.gpu_ids,
+                        server_url=args.server_url, model_id=args.model_id,
+                        enable_thinking=enable_thinking)
     else:
         print("Usage: --all or --model X --benchmark Y")

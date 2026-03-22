@@ -40,7 +40,12 @@ def _load_table_values(csv_path: str) -> Set[float]:
             try:
                 values.add(float(val))
             except (ValueError, TypeError):
-                pass
+                if isinstance(val, str):
+                    cleaned = val.replace('%', '').replace('$', '').replace(',', '').strip()
+                    try:
+                        values.add(float(cleaned))
+                    except (ValueError, TypeError):
+                        pass
     return values
 
 

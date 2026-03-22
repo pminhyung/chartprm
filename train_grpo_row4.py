@@ -473,10 +473,10 @@ def main():
         # Generation
         num_generations=4,
         max_completion_length=1024,
-        generation_batch_size=num_train_gpus * 2,  # Must equal global_batch = num_gpus * per_device_batch
+        generation_batch_size=num_train_gpus * 4,  # Must equal global_batch = num_gpus * per_device_batch
         # Training
         num_train_epochs=1,
-        per_device_train_batch_size=2,
+        per_device_train_batch_size=4,
         gradient_accumulation_steps=1,
         learning_rate=1e-6,
         warmup_steps=50,

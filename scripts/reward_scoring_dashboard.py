@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE = os.environ.get("CHARTVR_ROOT", "/ex_disk2/mhpark/poc/chartvr")
 
-# v5 audited logic
+# v5 audited logic (rule-based fallback)
 from code.rewards.reasoning_chain import (
     compute_process_reward,
     split_reasoning,
@@ -25,11 +25,18 @@ from code.rewards.reasoning_chain import (
     best_table_match,
 )
 
+# v6 structured verifier
+from code.rewards.llm_verifier import (
+    StructuredVerifier,
+    compute_process_reward_llm,
+    split_reasoning as split_reasoning_v6,
+)
+
 # ═══════════════════════════════════════════════════
 # Full reward analysis using v5 logic
 # ═══════════════════════════════════════════════════
 
-def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
+def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10, verifier=None, question=""):
     """Complete ChartVCR reward with v5 reasoning_chain."""
     # 1. Extract answer
     ans_match = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL | re.IGNORECASE)
@@ -61,8 +68,15 @@ def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
             r_fmt += 0.5
     r_fmt = min(r_fmt, 1.0)
 
-    # 4. Process reward (v5 audited logic)
-    r_proc, sentence_analyses = compute_process_reward(response, csv_path, sigma)
+    # 4. Process reward
+    if verifier and csv_path and os.path.exists(csv_path):
+        r_proc, sentence_analyses = compute_process_reward_llm(
+            response, csv_path, question, verifier, sigma
+        )
+        use_llm_verifier = True
+    else:
+        r_proc, sentence_analyses = compute_process_reward(response, csv_path, sigma)
+        use_llm_verifier = False
 
     # Load table for display
     table_df = None
@@ -101,6 +115,7 @@ def full_reward_analysis(response, gold_answer, csv_path="", sigma=0.10):
         "tainted_numbers": sorted(tainted),
         "num_sentences": len(sentence_analyses),
         "num_verified": sum(1 for a in sentence_analyses if a.label != "skip"),
+        "use_llm_verifier": use_llm_verifier,
     }
 
 
@@ -142,7 +157,20 @@ for item in grpo_data:
 
 # Sidebar
 st.sidebar.header("Settings")
+verifier_mode = st.sidebar.radio("Verifier", ["Rule-based (v5)", "LLM Structured (v6)"])
 sigma = st.sidebar.slider("σ (Gaussian tolerance)", 0.01, 0.30, 0.10, 0.01)
+
+# LLM verifier settings
+verifier = None
+if verifier_mode == "LLM Structured (v6)":
+    verifier_url = st.sidebar.text_input("Verifier URL", "http://localhost:9200/v1")
+    verifier_model = st.sidebar.text_input("Model ID", "verifier")
+    try:
+        verifier = StructuredVerifier(base_url=verifier_url, model_id=verifier_model)
+        st.sidebar.success("Verifier connected")
+    except Exception as e:
+        st.sidebar.error(f"Verifier error: {e}")
+
 filter_type = st.sidebar.radio("Filter", [
     "All", "Correct only", "Wrong only", "Has computation", "Has CSV"
 ])
@@ -183,7 +211,10 @@ csv_path = csv_lookup.get(sample["question"], "")
 img_path = img_lookup.get(sample["question"], "")
 
 # Run analysis
-analysis = full_reward_analysis(sample["response"], sample["gold_answer"], csv_path, sigma)
+analysis = full_reward_analysis(
+    sample["response"], sample["gold_answer"], csv_path, sigma,
+    verifier=verifier, question=sample.get("question", ""),
+)
 
 # ═══════════════════════════════════════════════════
 # Header metrics
@@ -237,7 +268,8 @@ if analysis["table_df"] is not None:
 # ═══════════════════════════════════════════════════
 # Reasoning Chain (v5 logic)
 # ═══════════════════════════════════════════════════
-st.subheader("🔗 Reasoning Chain — Sentence-by-Sentence (v5)")
+verifier_label = "LLM Structured (v6)" if analysis.get("use_llm_verifier") else "Rule-based (v5)"
+st.subheader(f"🔗 Reasoning Chain — {verifier_label}")
 st.caption(f"{analysis['num_sentences']} sentences, {analysis['num_verified']} verified, σ={sigma}")
 
 for sa in analysis["sentence_analyses"]:
@@ -256,17 +288,41 @@ for sa in analysis["sentence_analyses"]:
     ):
         st.markdown(f"> {sa.text}")
 
-        # Show numbers: chart vs filtered
-        if sa.chart_numbers:
-            st.markdown(f"**Chart numbers:** {sa.chart_numbers}")
-        if sa.filtered_numbers:
-            st.caption(f"Filtered out: {sa.filtered_numbers} (years/indices/counts)")
-
-        # Details
-        for d in sa.number_details:
-            st.markdown(d)
-        if sa.arithmetic:
-            st.markdown(f"**Arithmetic:** {sa.arithmetic}")
+        if analysis.get("use_llm_verifier"):
+            # LLM Structured verifier output
+            vo = sa.verifier_output
+            if vo.value_readings:
+                st.markdown("**Value Readings (LLM extracted):**")
+                for vr in vo.value_readings:
+                    unit_str = f" {vr.unit}" if vr.unit else ""
+                    st.markdown(f"- {vr.entity}: {vr.value}{unit_str}")
+            if vo.computations:
+                st.markdown("**Computations (LLM extracted):**")
+                for comp in vo.computations:
+                    st.markdown(f"- {comp.expression}")
+            if sa.value_scores:
+                st.markdown("**Table matching:**")
+                for val, score, matched in sa.value_scores:
+                    if score > 0.7:
+                        st.markdown(f"  {val} ✅ → {matched} (score={score:.3f})")
+                    elif score > 0.3:
+                        st.markdown(f"  {val} ⚠️ → {matched} (score={score:.3f})")
+                    else:
+                        st.markdown(f"  {val} ❌ → {matched} (score={score:.3f})")
+            if sa.computation_results:
+                for expr, correct in sa.computation_results:
+                    st.markdown(f"**Arithmetic:** {'✅' if correct else '❌'} {expr}")
+        else:
+            # Rule-based v5 output
+            if hasattr(sa, 'chart_numbers') and sa.chart_numbers:
+                st.markdown(f"**Chart numbers:** {sa.chart_numbers}")
+            if hasattr(sa, 'filtered_numbers') and sa.filtered_numbers:
+                st.caption(f"Filtered out: {sa.filtered_numbers} (years/indices/counts)")
+            if hasattr(sa, 'number_details'):
+                for d in sa.number_details:
+                    st.markdown(d)
+            if hasattr(sa, 'arithmetic') and sa.arithmetic:
+                st.markdown(f"**Arithmetic:** {sa.arithmetic}")
 
         # Score bars
         cols = st.columns(3)

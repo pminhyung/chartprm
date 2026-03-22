@@ -15,6 +15,8 @@ Chart-Verifiable Causal Rewards for Chart Reasoning via GRPO.
 
 ## GPU 정책
 
-- GPUs 0-1: vLLM 생성 서버
-- GPUs 2-11: GRPO 학습 (DeepSpeed ZeRO-3)
-- **GPUs 12-15: 사용 금지** (다른 사용자)
+- GPUs 2-11: 사용 가능 (GRPO 학습 + vLLM)
+- GPUs 0-1, 12-15: 유저 허가 시에만 사용
+- **절대 `nvidia-smi --gpu-reset` 실행 금지** — 다른 사용자 프로세스에 영향. zombie GPU memory 발생 시 유저에게 PID 기반 kill 커맨드를 제공할 것.
+- **절대 `fuser -k /dev/nvidia*` 실행 금지**
+- 프로세스 kill은 반드시 PID 기반으로만 (`kill <PID>`)

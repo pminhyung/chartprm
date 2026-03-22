@@ -371,7 +371,12 @@ def compute_process_reward(
                     try:
                         table_vals.add(float(v))
                     except (ValueError, TypeError):
-                        pass
+                        if isinstance(v, str):
+                            cleaned = v.replace('%', '').replace('$', '').replace(',', '').strip()
+                            try:
+                                table_vals.add(float(cleaned))
+                            except (ValueError, TypeError):
+                                pass
         except Exception:
             pass
 
