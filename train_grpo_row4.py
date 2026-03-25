@@ -15,6 +15,7 @@ Usage:
 """
 import argparse
 import json
+import logging
 import re
 import math
 import os
@@ -23,6 +24,11 @@ import torch
 from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoProcessor
 from trl import GRPOConfig, GRPOTrainer
+
+# Per-component metric logger (for ablation analysis)
+_metrics_logger = logging.getLogger("chartvr_metrics")
+_metrics_logger.setLevel(logging.INFO)
+_metrics_batch_counter = {"n": 0}
 
 BASE = os.environ.get("CHARTVR_ROOT", "/ex_disk2/mhpark/poc/chartvr")
 
@@ -308,6 +314,8 @@ def reward_chartvr(completions, answer, csv_path="", question="",
 
     # Score each completion
     results = []
+    r_acc_list, r_proc_list, r_fmt_list = [], [], []
+    total_vclaims, total_cclaims, claims_zero_count = 0, 0, 0
     for i, (resp, gold, csv, q) in enumerate(zip(resps, answer, csv_path, question)):
         ans = extract_answer(resp)
         r_acc = 1.0 if relaxed_match(ans, gold) else 0.0
@@ -327,7 +335,134 @@ def reward_chartvr(completions, answer, csv_path="", question="",
         lines = [l for l in resp.split('<think>')[1].split('</think>')[0].split('\n') if l.strip()] if '<think>' in resp and '</think>' in resp else []
         if len(lines) >= 3:
             r_fmt += 0.5
+        r_acc_list.append(r_acc)
+        r_proc_list.append(r_proc)
+        r_fmt_list.append(min(r_fmt, 1.0))
+        n_vclaims = len(extractions[i].value_claims) if extractions[i] else 0
+        n_cclaims = len(extractions[i].computation_claims) if extractions[i] else 0
+        total_vclaims += n_vclaims
+        total_cclaims += n_cclaims
+        if n_vclaims == 0 and n_cclaims == 0:
+            claims_zero_count += 1
         results.append(w_acc * r_acc + w_proc * r_proc + w_fmt * min(r_fmt, 1.0))
+
+    # Log per-component metrics
+    _metrics_batch_counter["n"] += 1
+    import numpy as np
+    _metrics_logger.info(json.dumps({
+        "batch": _metrics_batch_counter["n"],
+        "r_accuracy_mean": float(np.mean(r_acc_list)),
+        "r_process_mean": float(np.mean(r_proc_list)),
+        "r_format_mean": float(np.mean(r_fmt_list)),
+        "r_total_mean": float(np.mean(results)),
+        "num_value_claims": total_vclaims,
+        "num_computation_claims": total_cclaims,
+        "claims_zero_ratio": claims_zero_count / len(results) if results else 0,
+        "n_completions": len(results),
+    }))
+    return results
+
+
+def reward_chartvr_v2(completions, answer, csv_path="", question="",
+                      w_acc=0.5, w_proc=0.3, w_fmt=0.2,
+                      verifier=None, **kwargs):
+    """ChartVCR V2: final-chain scoring + length penalty.
+    Eliminates verbosity incentive from V1."""
+    if isinstance(answer, str):
+        answer = [answer] * len(completions)
+    if isinstance(csv_path, str):
+        csv_path = [csv_path] * len(completions)
+    if isinstance(question, str):
+        question = [question] * len(completions)
+
+    from code.rewards.llm_verifier import csv_to_text, compute_process_reward_v2 as compute_proc_v2, extract_reasoning
+    import asyncio
+
+    resps = [comp[0]["content"] if comp else "" for comp in completions]
+
+    # Batch verifier calls
+    extractions = [None] * len(resps)
+    if verifier:
+        async def batch_verify():
+            sem = asyncio.Semaphore(4)
+            async def verify_one(idx):
+                csv, q, resp = csv_path[idx], question[idx], resps[idx]
+                if not csv:
+                    return idx, None, ""
+                async with sem:
+                    csv_text = csv_to_text(csv)
+                    reasoning = extract_reasoning(resp)
+                    ext, raw = await verifier.verify_single(csv_text, q, reasoning)
+                    return idx, ext, reasoning
+            tasks = [verify_one(i) for i in range(len(resps))]
+            return await asyncio.gather(*tasks)
+
+        loop = asyncio.new_event_loop()
+        batch_results = loop.run_until_complete(batch_verify())
+        loop.close()
+        reasoning_texts = [""] * len(resps)
+        for idx, ext, reasoning in batch_results:
+            extractions[idx] = ext
+            reasoning_texts[idx] = reasoning
+    else:
+        reasoning_texts = [""] * len(resps)
+
+    results = []
+    r_acc_list, r_proc_list, r_fmt_list, len_penalty_list = [], [], [], []
+    total_vclaims, total_cclaims, claims_zero_count = 0, 0, 0
+    for i, (resp, gold, csv, q) in enumerate(zip(resps, answer, csv_path, question)):
+        ans = extract_answer(resp)
+        r_acc = 1.0 if relaxed_match(ans, gold) else 0.0
+
+        if extractions[i] is not None:
+            r_proc, _ = compute_proc_v2(extractions[i], reasoning_texts[i])
+        else:
+            r_proc = 0.0
+
+        # R_format: no line-count bonus (anti-verbosity)
+        r_fmt = 0.0
+        if '<think>' in resp and '</think>' in resp:
+            r_fmt += 0.5
+        if '<answer>' in resp:
+            r_fmt += 0.5
+
+        # Length penalty on thinking tokens
+        think_match = re.search(r'<think>(.*?)</think>', resp, re.DOTALL)
+        if think_match:
+            think_tokens = len(think_match.group(1).split())
+            length_penalty = max(0, min(1, (think_tokens - 300) / 300)) * 0.2
+        else:
+            length_penalty = 0
+
+        r_acc_list.append(r_acc)
+        r_proc_list.append(r_proc)
+        r_fmt_list.append(r_fmt)
+        len_penalty_list.append(length_penalty)
+        n_vclaims = len(extractions[i].value_claims) if extractions[i] else 0
+        n_cclaims = len(extractions[i].computation_claims) if extractions[i] else 0
+        total_vclaims += n_vclaims
+        total_cclaims += n_cclaims
+        if n_vclaims == 0 and n_cclaims == 0:
+            claims_zero_count += 1
+        total = w_acc * r_acc + w_proc * r_proc + w_fmt * r_fmt - length_penalty
+        results.append(max(0.0, total))
+
+    # Log per-component metrics
+    _metrics_batch_counter["n"] += 1
+    import numpy as np
+    _metrics_logger.info(json.dumps({
+        "batch": _metrics_batch_counter["n"],
+        "reward_version": "v2",
+        "r_accuracy_mean": float(np.mean(r_acc_list)),
+        "r_process_mean": float(np.mean(r_proc_list)),
+        "r_format_mean": float(np.mean(r_fmt_list)),
+        "length_penalty_mean": float(np.mean(len_penalty_list)),
+        "r_total_mean": float(np.mean(results)),
+        "num_value_claims": total_vclaims,
+        "num_computation_claims": total_cclaims,
+        "claims_zero_ratio": claims_zero_count / len(results) if results else 0,
+        "n_completions": len(results),
+    }))
     return results
 
 
@@ -371,7 +506,7 @@ def reward_geval(completions, answer, csv_path="", question="",
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reward_type", choices=["outcome_only", "chartvr", "geval"], required=True)
+    parser.add_argument("--reward_type", choices=["outcome_only", "chartvr", "chartvr_v2", "geval"], required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--model_path", default=os.path.join(BASE, "models/qwen3.5-4b"))
     parser.add_argument("--data_dir", default=os.path.join(BASE, "data/chartqa"))
@@ -384,6 +519,14 @@ def main():
     parser.add_argument("--verifier_url", default="http://10.1.211.148:8000/v1")
     parser.add_argument("--verifier_model", default="Qwen3.5-397B-A17B-FP8")
     args = parser.parse_args()
+
+    # Setup per-component metrics logger
+    os.makedirs(args.output_dir, exist_ok=True)
+    metrics_log_path = os.path.join(args.output_dir, "component_metrics.jsonl")
+    _mh = logging.FileHandler(metrics_log_path)
+    _mh.setFormatter(logging.Formatter("%(message)s"))
+    _metrics_logger.addHandler(_mh)
+    _metrics_logger.info(json.dumps({"event": "init", "reward_type": args.reward_type}))
 
     # Load dataset
     if args.data_json:
@@ -428,7 +571,7 @@ def main():
 
     # Initialize verifier if needed
     verifier = None
-    if args.reward_type in ("chartvr", "geval"):
+    if args.reward_type in ("chartvr", "chartvr_v2", "geval"):
         from code.rewards.llm_verifier import VerifierClient
         verifier = VerifierClient(
             base_url=args.verifier_url,
@@ -444,6 +587,15 @@ def main():
             return reward_geval(
                 completions, answer, csv_path, question,
                 verifier=verifier, **kw,
+            )
+    elif args.reward_type == "chartvr_v2":
+        def reward_fn(completions, answer, csv_path="", question="", **kw):
+            return reward_chartvr_v2(
+                completions, answer, csv_path, question,
+                w_proc=args.w_process,
+                w_acc=0.5 + (0.3 - args.w_process),
+                verifier=verifier,
+                **kw,
             )
     else:
         # chartvr: structured extraction + deterministic scoring

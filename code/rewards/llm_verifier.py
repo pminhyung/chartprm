@@ -423,6 +423,41 @@ def compute_process_reward(extraction: ExtractionResult, reasoning: str = "") ->
     }
 
 
+def compute_process_reward_v2(extraction: ExtractionResult, reasoning: str = "") -> Tuple[float, dict]:
+    """
+    V2: Final-chain scoring — only the last computation chain determines the reward.
+    Eliminates verbosity incentive: claim count is irrelevant.
+    """
+    if not extraction.value_claims and not extraction.computation_claims:
+        has_numbers = bool(re.search(r'\d+\.?\d*', reasoning))
+        return (0.2 if has_numbers else 0.0), {}
+
+    # Value claims only (no computation): same as V1
+    if not extraction.computation_claims:
+        correct = sum(1 for vc in extraction.value_claims if vc.is_correct)
+        return correct / len(extraction.value_claims), {}
+
+    # Core change: only the LAST computation chain is scored
+    final_comp = extraction.computation_claims[-1]
+    is_correct, actual = verify_computation(final_comp)
+
+    # Check if final computation uses tainted (incorrect) input values
+    incorrect_values = {vc.claimed_value for vc in extraction.value_claims if not vc.is_correct}
+    uses_tainted = any(
+        any(abs(op - iv) / max(abs(iv), 1e-10) < 0.05 for iv in incorrect_values)
+        for op in final_comp.operands
+    )
+
+    if is_correct and not uses_tainted:
+        return 1.0, {"final_chain": "correct+clean"}
+    elif is_correct and uses_tainted:
+        return 0.5, {"final_chain": "correct+tainted"}
+    elif not is_correct and uses_tainted:
+        return 0.3, {"final_chain": "wrong+tainted"}
+    else:
+        return 0.0, {"final_chain": "wrong+clean"}
+
+
 # ═══════════════════════════════════════════
 # Reward Functions (GRPO interface)
 # ═══════════════════════════════════════════
@@ -513,6 +548,46 @@ def reward_chartvr(
         if '<answer>' in resp or '[answer]' in resp:
             r_fmt += 0.5
         results.append(0.5 * r_acc + 0.3 * r_proc + 0.2 * r_fmt)
+    return results
+
+
+def reward_chartvr_v2(
+    completions: List[str], answer: str,
+    csv_path: str = "", question: str = "",
+    verifier: VerifierClient = None,
+    **kw,
+) -> List[float]:
+    """ChartVCR V2: final-chain scoring + length penalty.
+    Eliminates verbosity incentive from V1."""
+    if csv_path and verifier:
+        extraction_results = verifier.verify_batch_sync(csv_path, question, completions)
+    else:
+        extraction_results = [(ExtractionResult(), "")] * len(completions)
+
+    results = []
+    for i, resp in enumerate(completions):
+        r_acc = cerm_accuracy(extract_answer(resp), answer)
+        extraction, _ = extraction_results[i]
+        reasoning_text = extract_reasoning(resp)
+        r_proc, _ = compute_process_reward_v2(extraction, reasoning_text)
+
+        # R_format: no line-count bonus (anti-verbosity)
+        r_fmt = 0.0
+        if '<think>' in resp and '</think>' in resp:
+            r_fmt += 0.5
+        if '<answer>' in resp or '[answer]' in resp:
+            r_fmt += 0.5
+
+        # Length penalty on thinking tokens
+        think_match = re.search(r'<think>(.*?)</think>', resp, re.DOTALL)
+        if think_match:
+            think_tokens = len(think_match.group(1).split())
+            length_penalty = max(0, min(1, (think_tokens - 300) / 300)) * 0.2
+        else:
+            length_penalty = 0
+
+        total = 0.5 * r_acc + 0.3 * r_proc + 0.2 * r_fmt - length_penalty
+        results.append(max(0.0, total))
     return results
 
 

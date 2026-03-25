@@ -168,37 +168,27 @@ def load_benchmark(benchmark_name: str):
     return samples
 
 
+VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1")
+
+
 def run_inference(model_path: str, samples: list, gpu_ids: str = "0,1,2,3",
                   max_samples: int = None) -> list:
-    """Run inference using vLLM."""
-    from vllm import LLM, SamplingParams
+    """Run inference via OpenAI SDK against a vLLM-served model endpoint."""
+    from openai import OpenAI
+    from PIL import Image as PILImage
+    import io
 
     if max_samples:
         samples = samples[:max_samples]
 
-    num_gpus = len(gpu_ids.split(","))
-    llm = LLM(
-        model=model_path,
-        tensor_parallel_size=num_gpus,
-        gpu_memory_utilization=0.85,
-        max_model_len=8192,
-        trust_remote_code=True,
-        limit_mm_per_prompt={"image": 1},
-    )
+    # model_path can be a local path or a model name served by vLLM
+    model_name = os.path.basename(model_path)
+    client = OpenAI(api_key="EMPTY", base_url=VLLM_BASE_URL)
 
-    sampling_params = SamplingParams(
-        temperature=0,
-        max_tokens=1024,
-    )
-
-    # Prepare chat inputs (resize large images to fit max_model_len)
-    from PIL import Image as PILImage
-    import io
-
-    chat_inputs = []
-    for sample in samples:
+    results = []
+    for i, sample in enumerate(samples):
+        # Resize large images
         img = PILImage.open(sample["image_path"]).convert("RGB")
-        # Resize if image is too large (>1024px on any side)
         max_side = max(img.size)
         if max_side > 1024:
             scale = 1024 / max_side
@@ -215,24 +205,34 @@ def run_inference(model_path: str, samples: list, gpu_ids: str = "0,1,2,3",
                 {"type": "text", "text": EVAL_PROMPT.format(question=sample["question"])},
             ]
         }]
-        chat_inputs.append(messages)
 
-    outputs = llm.chat(chat_inputs, sampling_params)
+        try:
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=0,
+                max_tokens=1024,
+            )
+            response = resp.choices[0].message.content or ""
+        except Exception as e:
+            print(f"  [{i+1}/{len(samples)}] Error: {e}")
+            response = ""
 
-    results = []
-    for i, output in enumerate(outputs):
-        response = output.outputs[0].text
         pred = extract_answer(response)
-        gold = samples[i]["answer"]
+        gold = sample["answer"]
         acc = relaxed_accuracy(pred, gold)
 
         results.append({
-            "question": samples[i]["question"],
+            "question": sample["question"],
             "gold_answer": gold,
             "predicted_answer": pred,
             "response": response,
             "accuracy": acc,
         })
+
+        if (i + 1) % 50 == 0:
+            running_acc = sum(r["accuracy"] for r in results) / len(results)
+            print(f"  [{i+1}/{len(samples)}] running accuracy: {running_acc:.2%}")
 
     return results
 
