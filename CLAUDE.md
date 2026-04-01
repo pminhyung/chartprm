@@ -4,8 +4,9 @@ Chart-Verifiable Causal Rewards for Chart Reasoning via GRPO.
 
 ## 핵심 가이드 문서
 
-- **`docs/quickstart_guide.md`** — 학습/추론 최적 환경 및 즉시 실행 가이드. 환경, TRL 패치, GRPO 학습 커맨드, 하이퍼파라미터, OOM 방지 설정 포함.
-- **`docs/experiment_log.md`** — 환경/DeepSpeed/GPU 조합별 시도 결과 전체 기록. OOM 케이스, 디버깅 히스토리, 좀비 프로세스 대응 포함.
+- **`docs/training_memory_reference.md`** — **학습 세팅 필수 참조**. 모델별/GPU별 메모리 테스트 결과, 추천 설정, OOM 방지. 학습 시 이 문서의 설정을 그대로 사용하거나 `train_grpo_dapo.py`의 현재 코드를 사용할 것.
+- **`docs/quickstart_guide.md`** — 환경 및 즉시 실행 가이드.
+- **`docs/experiment_log.md`** — 환경/DeepSpeed/GPU 조합별 시도 결과 전체 기록.
 
 ## 환경
 
