@@ -119,6 +119,10 @@ def extract_answer(response):
     m = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL | re.IGNORECASE)
     if m:
         return _normalize(m.group(1).strip())
+    # Handle unclosed <answer> tag (e.g. when stop=["</answer>"] truncates it)
+    m = re.search(r'<answer>(.*?)$', response, re.DOTALL | re.IGNORECASE)
+    if m and m.group(1).strip():
+        return _normalize(m.group(1).strip())
     if '</think>' in response:
         after = response.split('</think>')[-1].strip()
         if after:
@@ -213,6 +217,7 @@ async def run_eval(benchmark_name, server_urls, model_id, output_dir):
                     messages=messages,
                     max_tokens=4096,
                     temperature=0.0,
+                    stop=["</answer>"],
                     extra_body={"chat_template_kwargs": {"enable_thinking": True}},
                 )
                 content = resp.choices[0].message.content or ""
