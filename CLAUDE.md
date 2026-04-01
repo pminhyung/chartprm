@@ -25,13 +25,19 @@ Chart-Verifiable Causal Rewards for Chart Reasoning via GRPO.
 
 ## Eval (벤치마크 추론)
 
-### 빠른 Eval 방법: 멀티 서버 병렬
+### 원칙
 
-사용 가능한 GPU에 각각 vLLM 서버(TP=1)를 띄우고, 벤치마크별로 순차 진행하되 모든 서버에 분산 요청하여 throughput 극대화.
+- **가용 GPU 전부 사용**: 각 GPU에 TP=1 vLLM 서버를 띄워 throughput 극대화
+- **비동기 병렬 요청**: 서버당 최대 5 concurrent 요청, 라운드로빈 로드밸런싱
+- **샘플 단위 append 저장**: JSONL에 샘플 완료 즉시 append → 중단 후 resume 가능
+- **resume 지원**: 이미 완료된 sample_id는 자동 skip
+- **Qwen3.5 thinking mode**: `--reasoning-parser qwen3` + `enable_thinking: True`
+
+### vLLM 서버 시작
 
 ```bash
-# Step 1: GPU 0-7에 8개 vLLM 서버 시작 (TP=1, 각각 다른 포트)
-for i in 0 1 2 3 4 5 6 7; do
+# 가용 GPU 전부에 TP=1 서버 (4B 모델은 TP=1만 가능)
+for i in 0 1 2 3 4 5 6 7 8 9 10 11; do
     port=$((8000 + i))
     CUDA_VISIBLE_DEVICES=$i nohup python -m vllm.entrypoints.openai.api_server \
         --model <MODEL_PATH> \
@@ -40,23 +46,61 @@ for i in 0 1 2 3 4 5 6 7; do
         --max-model-len 8192 \
         --port $port \
         --trust-remote-code \
+        --reasoning-parser qwen3 \
         > /tmp/vllm_eval_$i.log 2>&1 &
 done
-
-# Step 2: 전체 서버 ready 확인 (~3분 소요)
-for port in 8000 8001 8002 8003 8004 8005 8006 8007; do
-    until curl -s http://localhost:$port/v1/models | grep -q model; do sleep 2; done
-done
-
-# Step 3: 8개 서버에 분산 요청하며 eval 실행
-python eval_multi_server.py \
-    "8000,8001,8002,8003,8004,8005,8006,8007" \
-    "<MODEL_PATH>" \
-    "results/v6b/<run_name>" \
-    "chartqa_human,chartqa_augmented,charxiv_reasoning,chartqa_pro"
 ```
 
-- **스크립트**: `eval_multi_server.py` — 서버 URL 리스트를 받아 라운드로빈으로 분산, 서버당 4 concurrent 요청
-- **벤치마크**: chartqa_human, chartqa_augmented, charxiv_reasoning, chartqa_pro
-- **결과**: `results/v6b/<run_name>/<benchmark>.jsonl`
-- **주의**: 4B 모델은 TP=1만 가능. TP=4는 모델이 작아서 실패함.
+### Eval 실행
+
+```bash
+python eval_multi_server.py \
+    "8000,8001,...,8011" \
+    "<MODEL_PATH>" \
+    "results/v7/<run_name>" \
+    "chartqa_human,chartqa_augmented,charxiv_reasoning,chartqa_pro,chartmuseum"
+```
+
+- **스크립트**: `eval_multi_server.py` — 라운드로빈 분산, 서버당 5 concurrent, 샘플 단위 append
+- **벤치마크**: chartqa_human, chartqa_augmented, charxiv_reasoning, chartqa_pro, chartmuseum
+- **결과**: `results/v7/<run_name>/<benchmark>.jsonl`
+
+## Training (GRPO + LoRA)
+
+### 원칙
+
+- **메모리 최소화 기법 필수 적용**:
+  - `gradient_checkpointing=True` + `gradient_checkpointing_kwargs={"use_reentrant": True}` (Qwen3.5 호환)
+  - `use_liger_kernel=True` (fused kernels로 activation 메모리 절감)
+  - `attn_implementation="flash_attention_2"`
+- **DeepSpeed ZeRO-3 (CPU offloading 없음)** 선호 — offloading은 속도 저하가 큼
+- **batch size 통제**: 실험 간 effective batch size를 동일하게 유지해야 함
+  - `effective_batch = num_gpus × per_device_batch × gradient_accumulation_steps`
+  - target batch size에 도달한 후에는 GPU를 더 늘려도 batch를 늘리지 않음
+  - `gradient_accumulation_steps=1`로 target batch 도달 시 더 이상 GPU 추가 불필요
+- **가용 GPU 활용**: 메모리 기법으로 GPU당 부담을 줄이고, 필요한 만큼만 사용
+
+### 스크립트
+
+```bash
+# vLLM 서버 (generation용, 별도 GPU에 trl vllm-serve)
+CUDA_VISIBLE_DEVICES=<GPU> trl vllm-serve \
+    --model <MODEL_PATH> --tensor_parallel_size 1 \
+    --gpu_memory_utilization 0.85 --max_model_len 8192 \
+    --port 9100 --trust_remote_code
+
+# GRPO 학습
+CUDA_VISIBLE_DEVICES=<TRAIN_GPUS> accelerate launch \
+    --num_processes <N> --config_file scripts/deepspeed_zero3_nooffload_8gpu.yaml \
+    train_grpo_dapo.py \
+    --reward_type <outcome_only|conditional_cvr> \
+    --data data/charts_v2/chartvr_train_final.jsonl \
+    --output_dir ckpt/<run_name> \
+    --use_lora --lora_rank 64 --lora_alpha 128
+```
+
+### LoRA 머지 (eval 전)
+
+```bash
+python scripts/merge_lora.py --base models/qwen3.5-4b --lora ckpt/<run_name> --output ckpt/<run_name>_merged
+```

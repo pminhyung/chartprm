@@ -1,5 +1,6 @@
 """
 Multi-server eval: distributes requests across N vLLM servers for speed.
+Supports resume: writes results per-sample (append mode), skips already-done samples.
 """
 import asyncio
 import json
@@ -32,6 +33,11 @@ BENCHMARKS = {
     "chartqa_pro": {
         "data": os.path.join(BASE, "data/chartqa_pro/test.json"),
         "images": os.path.join(BASE, "data/chartqa_pro/images"),
+        "key_mapping": {"question": "query", "answer": "label", "image": "imgname"},
+    },
+    "chartmuseum": {
+        "data": os.path.join(BASE, "data/chartmuseum/test.json"),
+        "images": os.path.join(BASE, "data/chartmuseum/hf_data/images"),
         "key_mapping": {"question": "query", "answer": "label", "image": "imgname"},
     },
 }
@@ -100,6 +106,10 @@ def extract_answer(response):
     if '</think>' in response:
         after = response.split('</think>')[-1].strip()
         if after:
+            # Check for <answer> in post-think content
+            m2 = re.search(r'<answer>(.*?)</answer>', after, re.DOTALL | re.IGNORECASE)
+            if m2:
+                return _normalize(m2.group(1).strip())
             lines = [l.strip() for l in after.split('\n') if l.strip()]
             if lines:
                 return _normalize(lines[-1])
@@ -123,14 +133,46 @@ def load_benchmark(name):
     return samples
 
 
+def load_done_ids(out_path):
+    """Load already-completed sample IDs from existing JSONL file."""
+    done = set()
+    if os.path.exists(out_path):
+        with open(out_path) as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                    done.add(r["sample_id"])
+                except (json.JSONDecodeError, KeyError):
+                    pass
+    return done
+
+
 async def run_eval(benchmark_name, server_urls, model_id, output_dir):
     samples = load_benchmark(benchmark_name)
-    print(f"  {benchmark_name}: {len(samples)} samples, {len(server_urls)} servers")
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = os.path.join(output_dir, f"{benchmark_name}.jsonl")
+
+    # Resume: skip already-done samples
+    done_ids = load_done_ids(out_path)
+    todo = [(i, s) for i, s in enumerate(samples) if i not in done_ids]
+
+    if not todo:
+        # Read existing results for accuracy reporting
+        correct = 0
+        with open(out_path) as f:
+            for line in f:
+                r = json.loads(line)
+                correct += r.get("accuracy", 0)
+        print(f"  {benchmark_name}: already complete ({len(samples)} samples), accuracy={correct/len(samples):.2%}")
+        return correct / len(samples)
+
+    print(f"  {benchmark_name}: {len(todo)} remaining / {len(samples)} total, {len(server_urls)} servers")
 
     clients = [AsyncOpenAI(base_url=url, api_key="dummy") for url in server_urls]
-    sem = asyncio.Semaphore(len(server_urls) * 4)  # 4 concurrent per server
+    sem = asyncio.Semaphore(len(server_urls) * 5)  # 5 concurrent per server
+    file_lock = asyncio.Lock()
 
-    async def infer_one(idx, sample):
+    async def infer_and_write(idx, sample):
         client = clients[idx % len(clients)]
         async with sem:
             img = Image.open(sample["image_path"]).convert("RGB")
@@ -153,48 +195,57 @@ async def run_eval(benchmark_name, server_urls, model_id, output_dir):
                 resp = await client.chat.completions.create(
                     model=model_id,
                     messages=messages,
-                    max_tokens=2048,
+                    max_tokens=4096,
                     temperature=0.0,
                     extra_body={"chat_template_kwargs": {"enable_thinking": True}},
                 )
                 content = resp.choices[0].message.content or ""
                 raw = resp.choices[0].message.model_dump() if hasattr(resp.choices[0].message, 'model_dump') else {}
-                reasoning = raw.get("reasoning", "") or ""
-                full = f"<think>{reasoning}</think>\n{content}" if reasoning else content
-                return {"content": content, "reasoning_content": reasoning, "response": full, "error": None}
+                reasoning = raw.get("reasoning_content", "") or raw.get("reasoning", "") or ""
             except Exception as e:
-                return {"content": "", "reasoning_content": "", "response": "", "error": str(e)}
+                content, reasoning = "", ""
 
-    tasks = [infer_one(i, s) for i, s in enumerate(samples)]
-    outputs = await asyncio.gather(*tasks)
-
-    results = []
-    correct = 0
-    for i, output in enumerate(outputs):
-        pred = extract_answer(output["content"]) if not output["error"] else ""
-        gold = samples[i]["answer"]
+        pred = extract_answer(content) if content else ""
+        gold = sample["answer"]
         acc = relaxed_accuracy(pred, gold)
-        correct += acc
-        results.append({
-            "sample_id": i,
-            "question": samples[i]["question"],
+
+        result = {
+            "sample_id": idx,
+            "question": sample["question"],
             "gold_answer": gold,
-            "image_path": samples[i]["image_path"],
+            "image_path": sample["image_path"],
             "predicted_answer": pred,
-            "content": output["content"],
-            "reasoning_content": output["reasoning_content"],
+            "content": content,
+            "reasoning_content": reasoning,
             "accuracy": acc,
-            "error": output["error"],
-        })
+        }
 
-    accuracy = correct / len(results) if results else 0
-    print(f"  Accuracy: {accuracy:.2%} ({int(correct)}/{len(results)})")
+        # Append to file (thread-safe)
+        async with file_lock:
+            with open(out_path, "a") as f:
+                f.write(json.dumps(result, ensure_ascii=False) + "\n")
 
-    os.makedirs(output_dir, exist_ok=True)
-    out_path = os.path.join(output_dir, f"{benchmark_name}.jsonl")
-    with open(out_path, "w") as f:
-        for r in results:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        return acc
+
+    tasks = [infer_and_write(idx, s) for idx, s in todo]
+    accs = await asyncio.gather(*tasks)
+
+    # Final accuracy (including previously done)
+    total_correct = sum(accs) + sum(
+        1 for sid in done_ids
+        # count existing correct ones
+    )
+    # Re-read file for accurate count
+    correct = 0
+    with open(out_path) as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+                correct += r.get("accuracy", 0)
+            except json.JSONDecodeError:
+                pass
+    accuracy = correct / len(samples) if samples else 0
+    print(f"  Accuracy: {accuracy:.2%} ({int(correct)}/{len(samples)})")
     print(f"  Saved: {out_path}")
     return accuracy
 
