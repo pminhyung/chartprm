@@ -5,7 +5,6 @@ Supports resume: writes results per-sample (append mode), skips already-done sam
 import asyncio
 import json
 import os
-import re
 import sys
 import base64
 import io

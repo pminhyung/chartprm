@@ -36,11 +36,9 @@ class MultiHostClient:
         cfg = CLOSED_API[provider]
         kwargs = {"max_concurrent_per_host": cfg["max_concurrent"],
                   "model": provider, "api_key": api_key}
-        if cfg["base_url"]:
-            kwargs["hosts"] = [cfg["base_url"]]
-        else:
-            # Use provider's default SDK base_url
-            kwargs["hosts"] = ["https://api.openai.com/v1"]  # placeholder
+        if not cfg["base_url"]:
+            raise ValueError(f"base_url not configured for {provider} in chartvr.config.CLOSED_API")
+        kwargs["hosts"] = [cfg["base_url"]]
         return cls(**kwargs)
 
     @classmethod

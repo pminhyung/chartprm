@@ -1,10 +1,8 @@
 """QA arithmetic verification — single canonical implementation."""
 import re
 
-import pandas as pd
-
 # Unified calculation regex
-NUM_RE = r'[-+]?\d{1,3}(?:,\d{3})*(?:\.\d+)?'
+NUM_RE = r'[-+]?\d+(?:,?\d{3})*(?:\.\d+)?'
 CALC_RE = re.compile(
     rf'({NUM_RE})\s*([+\-*/×÷])\s*({NUM_RE})\s*[=≈]\s*({NUM_RE})'
 )
@@ -71,6 +69,7 @@ def verify_qa(qa: dict) -> bool:
 def verify_answer(qa: dict, csv_path: str) -> dict:
     """Verify QA answer by re-extracting values from CSV and recomputing.
     Returns qa with 'verified' and 'verify_reason' fields."""
+    import pandas as pd
     try:
         df = pd.read_csv(csv_path)
     except Exception:

@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from chartvr.config import ONPREM_HOSTS, ONPREM_MODEL, ONPREM_MAX_CONCURRENT_PER_HOST
+from chartvr.config import ONPREM_MAX_CONCURRENT_PER_HOST
 from chartvr.llm_client import MultiHostClient
 from chartvr.verification import verify_qa
 from chartvr.prompts import get_prompt
