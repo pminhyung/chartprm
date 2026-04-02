@@ -25,21 +25,15 @@ from PIL import Image
 from transformers import AutoProcessor
 
 # ═══════════════════════════════════════════
-# System Prompt (v7)
+# Shared imports from chartvr package
 # ═══════════════════════════════════════════
 
-SYSTEM_PROMPT = (
-    "A conversation between User and Assistant. The user asks a question, "
-    "and the Assistant solves it. The assistant first thinks about the "
-    "reasoning process in the mind and then provides the user with the answer. "
-    "The reasoning process and answer are enclosed within <think> </think> "
-    "and <answer> </answer> tags, respectively, i.e., "
-    "<think> reasoning process here </think><answer> answer here </answer>"
-)
+from chartvr.prompts import SYSTEM_PROMPT
+from chartvr.extraction import cerm_accuracy
 
 
 # ═══════════════════════════════════════════
-# Answer Extraction v2
+# Answer Extraction v2 (training-specific — kept inline for reward stability)
 # ═══════════════════════════════════════════
 
 def _normalize_tf(s: str) -> str:
@@ -83,22 +77,7 @@ def extract_answer_v2(response: str) -> str:
     return _normalize_tf(response.strip().split('\n')[-1])
 
 
-# ═══════════════════════════════════════════
-# CERM Accuracy (Continuous Error Magnitude)
-# ═══════════════════════════════════════════
-
-def cerm_accuracy(pred: str, gold: str) -> float:
-    """BigCharts-R1 style continuous accuracy. Returns float [0, 1]."""
-    p = re.sub(r'[,%$]', '', pred.strip())
-    g = re.sub(r'[,%$]', '', gold.strip())
-    try:
-        pf, gf = float(p), float(g)
-        if gf == 0:
-            return 1.0 if abs(pf) < 0.01 else 0.0
-        relative_change = abs(pf - gf) / abs(gf)
-        return 1.0 / (1.0 + relative_change)
-    except ValueError:
-        return 1.0 if p.lower() == g.lower() else 0.0
+# cerm_accuracy imported from chartvr.extraction
 
 
 # ═══════════════════════════════════════════

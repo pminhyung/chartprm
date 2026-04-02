@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""Async QA generation for v2 charts. Qwen3.5-397B, 4 concurrent, tqdm, resume."""
+"""Async QA generation for v2 charts.
+Multi-host round-robin + async parallel requests + per-host concurrency limit.
+Supports resume, tqdm, append-mode JSONL.
+"""
+import argparse
 import asyncio
 import json
 import os
@@ -14,9 +18,14 @@ BASE = "/ex_disk2/mhpark/poc/chartvr"
 ELIGIBLE_PATH = os.path.join(BASE, "data/charts_v2/qa_gen_eligible.json")
 OUTPUT_PATH = os.path.join(BASE, "data/charts_v2/generated_qa.jsonl")
 
-QWEN_URL = "http://10.1.211.148:8000/v1"
+DEFAULT_HOSTS = [
+    "http://10.1.211.147:8000/v1",
+    "http://10.1.211.148:8000/v1",
+    "http://10.1.211.169:8000/v1",
+    "http://10.1.211.170:8000/v1",
+]
 MODEL = "Qwen3.5-397B-A17B-FP8"
-MAX_CONCURRENT = 4
+MAX_CONCURRENT_PER_HOST = 5
 
 PROMPT_TEMPLATE = (
     "Generate exactly 3 multi-step reasoning QA pairs as JSON array from this data table.\n"
@@ -74,7 +83,8 @@ def verify_qa(qa: dict) -> bool:
     return comps_found > 0 and all_correct
 
 
-async def generate_one(client, sem, chart, lock, out_f, written_keys, stats):
+async def generate_one(clients, idx, sem, chart, lock, out_f, written_keys, stats):
+    client = clients[idx % len(clients)]  # Round-robin load balancing
     async with sem:
         csv_path = chart.get("csv_path", "")
         try:
@@ -129,13 +139,24 @@ async def generate_one(client, sem, chart, lock, out_f, written_keys, stats):
 
 
 async def main():
-    with open(ELIGIBLE_PATH) as f:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--hosts", type=str, default=None,
+                        help="Comma-separated host URLs (default: 4 on-premise hosts)")
+    parser.add_argument("--eligible", type=str, default=ELIGIBLE_PATH)
+    parser.add_argument("--output", type=str, default=OUTPUT_PATH)
+    parser.add_argument("--max_concurrent_per_host", type=int, default=MAX_CONCURRENT_PER_HOST)
+    args = parser.parse_args()
+
+    hosts = args.hosts.split(",") if args.hosts else DEFAULT_HOSTS
+    output_path = args.output
+
+    with open(args.eligible) as f:
         charts = json.load(f)
     print(f"Loaded {len(charts)} charts", flush=True)
 
     written_keys, done_slugs, existing_qa = set(), set(), 0
-    if os.path.exists(OUTPUT_PATH):
-        with open(OUTPUT_PATH) as f:
+    if os.path.exists(output_path):
+        with open(output_path) as f:
             for line in f:
                 try:
                     rec = json.loads(line)
@@ -145,15 +166,19 @@ async def main():
                 except: pass
 
     pending = [c for c in charts if c.get("slug", "") not in done_slugs]
-    print(f"Existing: {existing_qa}, Pending: {len(pending)}", flush=True)
 
-    client = AsyncOpenAI(base_url=QWEN_URL, api_key="dummy", timeout=120.0)
-    sem = asyncio.Semaphore(MAX_CONCURRENT)
+    # Multi-host setup
+    clients = [AsyncOpenAI(base_url=url, api_key="dummy", timeout=120.0) for url in hosts]
+    sem = asyncio.Semaphore(len(hosts) * args.max_concurrent_per_host)
     lock = asyncio.Lock()
     stats = {"new_qa": 0, "errors": 0}
 
-    out_f = open(OUTPUT_PATH, "a")
-    tasks = [generate_one(client, sem, c, lock, out_f, written_keys, stats) for c in pending]
+    print(f"Hosts: {len(hosts)}, Max concurrent: {len(hosts) * args.max_concurrent_per_host}", flush=True)
+    print(f"Existing: {existing_qa}, Pending: {len(pending)}", flush=True)
+
+    out_f = open(output_path, "a")
+    tasks = [generate_one(clients, i, sem, c, lock, out_f, written_keys, stats)
+             for i, c in enumerate(pending)]
 
     pbar = tqdm(total=len(tasks), desc="QA Gen v2", unit="chart")
     for coro in asyncio.as_completed(tasks):
@@ -163,7 +188,7 @@ async def main():
     pbar.close()
     out_f.close()
 
-    total = sum(1 for _ in open(OUTPUT_PATH))
+    total = sum(1 for _ in open(output_path))
     print(f"\nDone: +{stats['new_qa']}, total={total} QAs (errors={stats['errors']})", flush=True)
 
 

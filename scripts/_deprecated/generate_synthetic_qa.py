@@ -34,7 +34,12 @@ CHARTS_DIR = os.path.join(BASE, "data/chartqa/train/tables")
 IMAGES_DIR = os.path.join(BASE, "data/chartqa/train/png")
 OUTPUT_DIR = os.path.join(BASE, "data/chartvr_train")
 
-QWEN_URL = "http://10.1.211.148:8000/v1"
+DEFAULT_HOSTS = [
+    "http://10.1.211.147:8000/v1",
+    "http://10.1.211.148:8000/v1",
+    "http://10.1.211.169:8000/v1",
+    "http://10.1.211.170:8000/v1",
+]
 QWEN_MODEL = "Qwen3.5-397B-A17B-FP8"
 
 
@@ -148,12 +153,14 @@ def parse_json_from_response(raw: str) -> list:
 
 
 async def generate_qa_for_chart(
-    client: AsyncOpenAI,
+    clients: list,
+    idx: int,
     csv_path: str,
     csv_name: str,
     semaphore: asyncio.Semaphore,
 ) -> List[dict]:
     """Generate QA pairs for one chart."""
+    client = clients[idx % len(clients)]  # Round-robin load balancing
     async with semaphore:
         csv_text = csv_to_text(csv_path)
         if not csv_text:
@@ -315,7 +322,7 @@ def verify_answer(qa: dict, csv_path: str) -> dict:
 # ═══════════════════════════════════════════
 
 async def check_difficulty_batch(
-    client: AsyncOpenAI,
+    clients: list,
     qa_pairs: List[dict],
     semaphore: asyncio.Semaphore,
     num_attempts: int = 5,
@@ -324,9 +331,12 @@ async def check_difficulty_batch(
     Use qwen_onpremise to attempt answering each question.
     Keep questions where model gets it right 30-70% of the time.
     """
+    _attempt_counter = {"n": 0}
 
     async def attempt_one(qa: dict) -> bool:
         """One zero-shot attempt. Returns True if correct."""
+        _attempt_counter["n"] += 1
+        client = clients[_attempt_counter["n"] % len(clients)]
         async with semaphore:
             csv_text = csv_to_text(qa["csv_path"])
             try:
@@ -397,10 +407,12 @@ async def check_difficulty_batch(
 # Main Pipeline
 # ═══════════════════════════════════════════
 
-async def run_generation(max_charts: int, max_concurrent: int = 8):
+async def run_generation(max_charts: int, max_concurrent_per_host: int = 5, hosts: list = None):
     """Step 1+2: Generate QA pairs and verify."""
-    client = AsyncOpenAI(base_url=QWEN_URL, api_key="dummy")
-    semaphore = asyncio.Semaphore(max_concurrent)
+    hosts = hosts or DEFAULT_HOSTS
+    clients = [AsyncOpenAI(base_url=url, api_key="dummy", timeout=120.0) for url in hosts]
+    semaphore = asyncio.Semaphore(len(hosts) * max_concurrent_per_host)
+    print(f"Hosts: {len(hosts)}, Max concurrent: {len(hosts) * max_concurrent_per_host}", flush=True)
 
     # Get eligible CSVs — use cache if available
     cache_path = os.path.join(OUTPUT_DIR, "csv_eligible.json")
@@ -436,8 +448,8 @@ async def run_generation(max_charts: int, max_concurrent: int = 8):
     for batch_start in range(0, len(eligible), batch_size):
         batch = eligible[batch_start:batch_start + batch_size]
         tasks = [
-            generate_qa_for_chart(client, csv_path, csv_name, semaphore)
-            for csv_name, csv_path in batch
+            generate_qa_for_chart(clients, batch_start + i, csv_path, csv_name, semaphore)
+            for i, (csv_name, csv_path) in enumerate(batch)
         ]
         batch_results = await asyncio.gather(*tasks)
         for qa_list in batch_results:
@@ -475,10 +487,12 @@ async def run_generation(max_charts: int, max_concurrent: int = 8):
     return all_qa
 
 
-async def run_filter(max_concurrent: int = 8):
+async def run_filter(max_concurrent_per_host: int = 5, hosts: list = None):
     """Step 3: Difficulty filter."""
-    client = AsyncOpenAI(base_url=QWEN_URL, api_key="dummy")
-    semaphore = asyncio.Semaphore(max_concurrent)
+    hosts = hosts or DEFAULT_HOSTS
+    clients = [AsyncOpenAI(base_url=url, api_key="dummy", timeout=120.0) for url in hosts]
+    semaphore = asyncio.Semaphore(len(hosts) * max_concurrent_per_host)
+    print(f"Hosts: {len(hosts)}, Max concurrent: {len(hosts) * max_concurrent_per_host}", flush=True)
 
     verified_path = os.path.join(OUTPUT_DIR, "verified_qa.jsonl")
     if not os.path.exists(verified_path):
@@ -489,7 +503,7 @@ async def run_filter(max_concurrent: int = 8):
         qa_pairs = [json.loads(l) for l in f if l.strip()]
     print(f"Loaded {len(qa_pairs)} verified QAs for difficulty filtering")
 
-    filtered = await check_difficulty_batch(client, qa_pairs, semaphore)
+    filtered = await check_difficulty_batch(clients, qa_pairs, semaphore)
     print(f"\nDifficulty filter: {len(filtered)}/{len(qa_pairs)} passed (30-70% accuracy)")
 
     # Save
@@ -517,17 +531,20 @@ async def run_filter(max_concurrent: int = 8):
 
 
 async def main_async(args):
+    hosts = args.hosts.split(",") if args.hosts else DEFAULT_HOSTS
     if args.step in ("generate", "all"):
-        await run_generation(args.max_charts, args.concurrency)
+        await run_generation(args.max_charts, args.max_concurrent_per_host, hosts)
     if args.step in ("filter", "all"):
-        await run_filter(args.concurrency)
+        await run_filter(args.max_concurrent_per_host, hosts)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--step", choices=["generate", "filter", "all"], default="all")
     parser.add_argument("--max_charts", type=int, default=2000)
-    parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--max_concurrent_per_host", type=int, default=5)
+    parser.add_argument("--hosts", type=str, default=None,
+                        help="Comma-separated host URLs (default: 4 on-premise hosts)")
     args = parser.parse_args()
 
     asyncio.run(main_async(args))
