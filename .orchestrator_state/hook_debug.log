@@ -610,3 +610,108 @@
 [2026-03-25T04:01:02Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
 [2026-03-25T04:01:02Z] [training-status-check] PASS: PASS: Not a training agent
 [2026-03-25T04:08:53Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-25T05:22:18Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-25T05:23:00Z] [phase-sequence-validator] PASS: PASS: Not a Task call (Agent)
+[2026-03-25T05:23:00Z] [gate-enforcement] PASS: PASS: Not a Task call (Agent)
+[2026-03-25T05:31:14Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
+[2026-03-25T05:31:14Z] [training-status-check] PASS: PASS: Not a training agent
+[2026-03-25T05:40:48Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-25T05:41:21Z] [gate-enforcement] PASS: PASS: Not a Task call (Agent)
+[2026-03-25T05:41:21Z] [phase-sequence-validator] PASS: PASS: Not a Task call (Agent)
+[2026-03-25T05:46:20Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
+[2026-03-25T05:46:20Z] [training-status-check] PASS: PASS: Not a training agent
+[2026-03-31T13:01:15Z] [session-manager] WARN: Session expired after 192.7h (TTL: 24h). Resetting.
+[2026-03-31T13:02:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-31T13:02:28Z] [gate-enforcement] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:02:28Z] [phase-sequence-validator] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:02:32Z] [gate-enforcement] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:02:32Z] [phase-sequence-validator] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:04:24Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
+[2026-03-31T13:04:24Z] [training-status-check] PASS: PASS: Not a training agent
+[2026-03-31T13:04:29Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
+[2026-03-31T13:04:29Z] [training-status-check] PASS: PASS: Not a training agent
+[2026-03-31T13:53:12Z] [gate-enforcement] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:53:12Z] [phase-sequence-validator] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:53:19Z] [gate-enforcement] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:53:19Z] [phase-sequence-validator] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:53:27Z] [gate-enforcement] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:53:27Z] [phase-sequence-validator] PASS: PASS: Not a Task call (Agent)
+[2026-03-31T13:55:28Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
+[2026-03-31T13:55:28Z] [training-status-check] PASS: PASS: Not a training agent
+[2026-03-31T13:55:43Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
+[2026-03-31T13:55:43Z] [training-status-check] PASS: PASS: Not a training agent
+[2026-03-31T13:55:46Z] [post-agent-hooks] PASS: PASS: Unknown agent, skipping
+[2026-03-31T13:55:46Z] [training-status-check] PASS: PASS: Not a training agent
+[2026-03-31T14:12:46Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-31T14:14:05Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-31T15:53:36Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-31T16:13:07Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-31T16:54:22Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-31T18:54:42Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-03-31T22:55:10Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T00:02:10Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T00:08:51Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T00:14:10Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T01:12:28Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T01:21:06Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:41:45Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T03:50:19Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:00:06Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:37:19Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:37:55Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:38:41Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:47:05Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:49:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:51:33Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T04:59:15Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T05:05:21Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T05:41:35Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T09:41:49Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T13:42:37Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T14:47:50Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:04:46Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:04:46Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:04:46Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:05:15Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:06:21Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:07:22Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:08:01Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:08:23Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:09:21Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:10:29Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:11:30Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:19:56Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:35:58Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T15:35:58Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:16Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:19:54Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:21:47Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:23:11Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:34:55Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:34:55Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:39:29Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:40:02Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:41:04Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:42:32Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:49:27Z] [trigger-router] INFO: Cold start: help guide shown
+[2026-04-01T16:54:29Z] [trigger-router] INFO: Cold start: help guide shown

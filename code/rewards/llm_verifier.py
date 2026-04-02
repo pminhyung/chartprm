@@ -462,51 +462,12 @@ def compute_process_reward_v2(extraction: ExtractionResult, reasoning: str = "")
 # Reward Functions (GRPO interface)
 # ═══════════════════════════════════════════
 
-def extract_answer(response: str) -> str:
-    # [answer]...[/answer]
-    m = re.search(r'\[answer\](.*?)\[/answer\]', response, re.DOTALL | re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    # <answer>...</answer> — last occurrence
-    matches = re.findall(r'<answer>(.*?)</answer>', response, re.DOTALL | re.IGNORECASE)
-    if matches:
-        return matches[-1].strip()
-    # After </think>
-    if '</think>' in response:
-        after = response.split('</think>')[-1].strip()
-        lines = [l.strip() for l in after.split('\n') if l.strip()]
-        if lines:
-            return lines[-1]
-    return response.strip().split('\n')[-1] if response.strip() else ""
+from chartvr.extraction import extract_answer, relaxed_accuracy, cerm_accuracy
 
 
 def relaxed_match(pred: str, gold: str) -> bool:
-    """Binary relaxed accuracy (5% tolerance). Used for evaluation only."""
-    p = re.sub(r'[,%$]', '', pred.strip())
-    g = re.sub(r'[,%$]', '', gold.strip())
-    try:
-        pf, gf = float(p), float(g)
-        return abs(pf - gf) / max(abs(gf), 1e-10) <= 0.05 if gf != 0 else abs(pf) < 0.01
-    except ValueError:
-        return p.lower() == g.lower()
-
-
-def cerm_accuracy(pred: str, gold: str) -> float:
-    """Continuous Error Magnitude Reward (CERM). BigCharts-R1 method.
-    Used for GRPO training reward (both baseline and ours).
-
-    Exact match → 1.0, 5% error → 0.95, 50% error → 0.67
-    """
-    p = re.sub(r'[,%$]', '', pred.strip())
-    g = re.sub(r'[,%$]', '', gold.strip())
-    try:
-        pf, gf = float(p), float(g)
-        if gf == 0:
-            return 1.0 if abs(pf) < 0.01 else 0.0
-        relative_change = abs(pf - gf) / abs(gf)
-        return 1.0 / (1.0 + relative_change)
-    except ValueError:
-        return 1.0 if p.lower() == g.lower() else 0.0
+    """Binary relaxed accuracy. Wrapper for backward compat."""
+    return relaxed_accuracy(pred, gold) == 1.0
 
 
 def reward_outcome_only(completions: List[str], answer: str, **kw) -> List[float]:
