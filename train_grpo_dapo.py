@@ -96,17 +96,6 @@ _batch_counter = {"n": 0}
 # Reward Functions
 # ═══════════════════════════════════════════
 
-def _format_penalty(resp: str) -> float:
-    """Penalize incomplete format: missing </think> or <answer> tags.
-    Returns 0.0 if format is complete, -0.1 if incomplete.
-    This encourages the model to finish its reasoning and produce an answer."""
-    has_think_close = '</think>' in resp
-    has_answer = bool(re.search(r'<answer>.*?</answer>', resp, re.DOTALL))
-    if has_think_close and has_answer:
-        return 0.0
-    return -0.1
-
-
 def reward_outcome_only_dapo(completions, answer, **kwargs) -> List[float]:
     """Row A: DAPO + CERM outcome-only."""
     if isinstance(answer, str):
@@ -117,8 +106,7 @@ def reward_outcome_only_dapo(completions, answer, **kwargs) -> List[float]:
         resp = comp[0]["content"] if comp else ""
         pred = extract_answer_v2(resp)
         r_acc = cerm_accuracy(pred, str(gold))
-        r_total = max(0.0, r_acc + _format_penalty(resp))
-        results.append(r_total)
+        results.append(r_acc)
         r_acc_list.append(r_acc)
 
     _batch_counter["n"] += 1
@@ -172,11 +160,9 @@ def reward_conditional_cvr(completions, answer, csv_path="", question="",
         else:
             think_lengths.append(0)
 
-        fmt_pen = _format_penalty(resp)
-
-        # Conditional: correct -> 1.0 (with possible format penalty), wrong -> R_proc
+        # Conditional: correct -> 1.0, wrong -> R_proc
         if r_acc >= 0.95:
-            results.append(max(0.0, 1.0 + fmt_pen))
+            results.append(1.0)
             r_acc_list.append(r_acc)
             r_proc_list.append(1.0)
             n_correct += 1
@@ -188,7 +174,7 @@ def reward_conditional_cvr(completions, answer, csv_path="", question="",
         else:
             r_proc = 0.5  # fallback
 
-        r_total = max(0.0, min(1.0, r_acc + 0.3 * r_proc) + fmt_pen)
+        r_total = min(1.0, r_acc + 0.3 * r_proc)
         results.append(r_total)
         r_acc_list.append(r_acc)
         r_proc_list.append(r_proc)
