@@ -59,12 +59,10 @@ def _normalize(answer):
     range_match = re.match(r'^(\d{4})\s+to\s+(\d{4})$', answer.strip())
     if range_match:
         return range_match.group(2)
-    # Handle comma-separated lists — take first item
-    if len(answer) > 10 and ',' in answer:
+    # Handle comma-separated lists — only for Yes/No detection
+    if len(answer) > 20 and ',' in answer:
         first = answer.split(',')[0].strip()
         if first.lower() in ('yes', 'no'):
-            return first
-        if len(answer) > 30:
             return first
     ans_lower = answer.lower()
     if 'no' in ans_lower.split()[:3] or ans_lower.startswith('no'):
