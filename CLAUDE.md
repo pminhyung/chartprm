@@ -66,6 +66,57 @@ python eval_multi_server.py \
 - **벤치마크**: chartqa_human, chartqa_augmented, charxiv_reasoning, chartqa_pro, chartmuseum
 - **결과**: `results/v7/<run_name>/<benchmark>.jsonl`
 
+## QA Generation (397B)
+
+397B (Qwen3.5-397B-A17B-FP8)은 QA 생성·CoT·reward verifier 공용.
+
+### 원칙
+
+- **반드시 `scripts/launch_397b_vllm.sh` 사용** — 추천 플래그가 전부 default로 박혀 있음
+  - `--reasoning-parser qwen3` — `<think>...</think>` 자동 파싱, 누락 시 thinking 모드에서 raw 태그 노출 + artifacts
+  - `--generation-config vllm` — 모델의 `generation_config.json` (thinking 기본값 temp=0.6/top_p=0.95) 무시. `chartvr/llm_client.py`가 `enable_thinking` 플래그 기반으로 올바른 샘플링 파라미터를 명시 주입하므로 generation_config 오염 방지
+  - `--enforce-eager` — GPTQ-int4 + TP=8 안정화
+  - `setsid ... </dev/null & disown` — 세션 compaction SIGHUP 회피
+- **샘플링 파라미터**: `chartvr/config.py::SAMPLING_PARAMS["397b"]` (thinking/instruct 분리)
+  - instruct (non-thinking): temp=0.7, top_p=0.8, top_k=20, min_p=0 (Qwen 공식 권장)
+  - thinking: temp=0.6, top_p=0.95, top_k=20, min_p=0
+  - `MultiHostClient.chat()`이 `enable_thinking`에 따라 자동 주입
+- **Dual-host multi-port**: 9200 (GPU 0-7, 4k) + 9201 (GPU 8-15, 64k) 병렬 운용
+
+### 서버 시작
+
+```bash
+# 표준 dual-host (QA 생성 throughput 2×)
+./scripts/launch_397b_vllm.sh 9200 0,1,2,3,4,5,6,7 4096
+./scripts/launch_397b_vllm.sh 9201 8,9,10,11,12,13,14,15 65536
+
+# Ready 확인
+curl -s http://localhost:9200/v1/models | jq
+curl -s http://localhost:9201/v1/models | jq
+```
+
+### QA 생성 실행
+
+```bash
+# 4개 sub-prompt × dual-host × concurrent=6 (host당 6, total 12)
+HOSTS="http://localhost:9200/v1,http://localhost:9201/v1"
+for qa_type in sci_ranking sci_numeric sci_trend sci_compare; do
+    python scripts/generate_qa.py generate \
+        --eligible data/charts_v9/block_c_eligible_v2_${qa_type#sci_}.json \
+        --prompt ${qa_type} \
+        --n_qa_per_chart 1 \
+        --hosts "$HOSTS" \
+        --max_concurrent_per_host 6 \
+        --output data/charts_v9/block_c_api_qa_v2_${qa_type}.jsonl
+done
+```
+
+### GPU 운영 정책 (v9.1+)
+
+- **QA 생성 단계**: 9200 + 9201 둘 다 사용 (throughput 2×)
+- **학습 전환 단계**: **9200만 kill**하여 GPU 0-7 확보. 9201 은 그대로 유지.
+- 학습: `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7`
+
 ## Training (GRPO + LoRA)
 
 ### 원칙

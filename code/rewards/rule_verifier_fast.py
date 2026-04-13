@@ -40,6 +40,91 @@ def get_table_values(csv_path: str) -> Set[float]:
         return set()
 
 
+def compute_process_components_fast(response: str, csv_path: str):
+    """Return (grounding, arithmetic) components in [0, 1].
+
+    Used by compute_process_reward_fast and VAPV component ablations
+    (reward_conditional_v2_value_only / _arith_only).
+
+    Signal conventions when CSV absent or reasoning empty: (0.5, 0.5) neutral.
+    """
+    table_values = get_table_values(csv_path)
+    if not table_values:
+        return 0.5, 0.5
+
+    think_match = re.search(r'<think>(.*?)</think>', response, re.DOTALL)
+    if think_match:
+        reasoning = think_match.group(1)
+    elif '</think>' in response:
+        reasoning = response[:response.index('</think>')]
+    else:
+        answer_match = re.search(r'<answer>', response)
+        reasoning = response[:answer_match.start()] if answer_match else response
+
+    if not reasoning.strip():
+        return 0.0, 0.0
+
+    numbers = []
+    for m in re.findall(NUM_RE, reasoning):
+        try:
+            n = _parse_num(m)
+            if not _is_likely_year(n):
+                numbers.append(n)
+        except ValueError:
+            pass
+
+    if not numbers:
+        grounding = 0.0
+    else:
+        matched = 0
+        denom = 0
+        for n in numbers:
+            if abs(n) < 1e-10:
+                continue
+            denom += 1
+            best_score = max(
+                (1.0 / (1.0 + abs(n - tv) / max(abs(tv), 1e-10))
+                 for tv in table_values),
+                default=0.0,
+            )
+            if best_score > 0.8:
+                matched += 1
+        grounding = matched / denom if denom else 0.0
+
+    calc_matches = re.findall(CALC_RE, reasoning)
+    if calc_matches:
+        correct = 0
+        for m in calc_matches:
+            try:
+                a = _parse_num(m[0])
+                op = m[1].replace('×', '*').replace('÷', '/')
+                b = _parse_num(m[2])
+                stated = _parse_num(m[3])
+                if op == '+':
+                    expected = a + b
+                elif op == '-':
+                    expected = a - b
+                elif op == '*':
+                    expected = a * b
+                elif op == '/' and b != 0:
+                    expected = a / b
+                else:
+                    correct += 1
+                    continue
+                if expected != 0:
+                    if abs(stated - expected) / abs(expected) < 0.05:
+                        correct += 1
+                elif abs(stated) < 0.01:
+                    correct += 1
+            except Exception:
+                correct += 1
+        arithmetic = correct / len(calc_matches)
+    else:
+        arithmetic = 0.5
+
+    return grounding, arithmetic
+
+
 def compute_process_reward_fast(response: str, csv_path: str) -> float:
     """
     Pure rule-based process reward. ~1ms/completion.
@@ -130,5 +215,96 @@ def compute_process_reward_fast(response: str, csv_path: str) -> float:
         arithmetic = correct / len(calc_matches)
     else:
         arithmetic = 0.5  # no calculations -> neutral
+
+    return 0.6 * grounding + 0.4 * arithmetic
+
+
+def compute_process_reward_v2(response: str, csv_path: str) -> float:
+    """Tightened rule-based process reward v2. ~1ms/completion.
+
+    Changes from v1:
+    - Grounding threshold: 0.8 → 0.9 (~10% tolerance)
+    - Arithmetic default: 0.5 → 0.0 (no calcs = no bonus)
+    - No CSV fallback: 0.5 → 0.0
+    - Parse failures: no penalty → skip (no credit)
+    """
+    table_values = get_table_values(csv_path)
+    if not table_values:
+        return 0.0
+
+    think_match = re.search(r'<think>(.*?)</think>', response, re.DOTALL)
+    if think_match:
+        reasoning = think_match.group(1)
+    elif '</think>' in response:
+        reasoning = response[:response.index('</think>')]
+    else:
+        answer_match = re.search(r'<answer>', response)
+        reasoning = response[:answer_match.start()] if answer_match else response
+
+    if not reasoning.strip():
+        return 0.0
+
+    numbers = []
+    for m in re.findall(NUM_RE, reasoning):
+        try:
+            n = _parse_num(m)
+            if not _is_likely_year(n):
+                numbers.append(n)
+        except ValueError:
+            pass
+
+    if not numbers:
+        return 0.0
+
+    # (1) Value Grounding — tighter threshold
+    non_zero = [n for n in numbers if abs(n) >= 1e-10]
+    if not non_zero:
+        grounding = 0.0
+    else:
+        matched = 0
+        for n in non_zero:
+            best_score = max(
+                (1.0 / (1.0 + abs(n - tv) / max(abs(tv), 1e-10))
+                 for tv in table_values),
+                default=0.0
+            )
+            if best_score > 0.9:  # ~10% tolerance (was 0.8)
+                matched += 1
+        grounding = matched / len(non_zero)
+
+    # (2) Arithmetic — strict default
+    calc_matches = re.findall(CALC_RE, reasoning)
+    if calc_matches:
+        correct = 0
+        total = 0
+        for m in calc_matches:
+            try:
+                a = _parse_num(m[0])
+                op = m[1].replace('×', '*').replace('÷', '/')
+                b = _parse_num(m[2])
+                stated = _parse_num(m[3])
+
+                if op == '+':
+                    expected = a + b
+                elif op == '-':
+                    expected = a - b
+                elif op == '*':
+                    expected = a * b
+                elif op == '/' and b != 0:
+                    expected = a / b
+                else:
+                    continue  # skip unverifiable
+
+                total += 1
+                if expected != 0:
+                    if abs(stated - expected) / abs(expected) < 0.05:
+                        correct += 1
+                elif abs(stated) < 0.01:
+                    correct += 1
+            except Exception:
+                continue  # skip parse failures
+        arithmetic = correct / total if total > 0 else 0.0
+    else:
+        arithmetic = 0.0  # no calculations → no bonus (was 0.5)
 
     return 0.6 * grounding + 0.4 * arithmetic

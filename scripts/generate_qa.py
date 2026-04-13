@@ -39,8 +39,14 @@ from chartvr.prompts import get_prompt
 # Generate
 # ═══════════════════════════════════════════
 
-async def generate_one(client, chart, lock, out_f, written_keys, stats, prompt_text):
-    """Generate QAs for one chart."""
+async def generate_one(client, chart, lock, out_f, written_keys, stats, prompt_text,
+                       qa_type="numeric", n_qa_per_chart=None):
+    """Generate QAs for one chart.
+
+    Args:
+        qa_type: Sub-prompt name (stored in qa_type field for analysis).
+        n_qa_per_chart: If set, cap the number of QAs kept per chart.
+    """
     csv_path = chart.get("csv_path", "")
     try:
         df = pd.read_csv(csv_path)
@@ -53,7 +59,7 @@ async def generate_one(client, chart, lock, out_f, written_keys, stats, prompt_t
     try:
         resp = await client.chat(
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000, temperature=0.7,
+            # max_tokens omitted: vLLM auto = max_model_len - prompt_tokens
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         )
         raw = resp.choices[0].message.content or ""
@@ -71,16 +77,28 @@ async def generate_one(client, chart, lock, out_f, written_keys, stats, prompt_t
     except (json.JSONDecodeError, ValueError):
         qa_list = []
 
+    # sci_* sub-prompts have one enforced answer type per prompt and don't
+    # necessarily include arithmetic reasoning (e.g. sci_numeric is a lookup).
+    # Skip verify_qa (which requires arithmetic) for these; rely on sub-prompt
+    # constraint + QC audit post-generation.
+    skip_verify = qa_type.startswith("sci_")
+
+    n_kept = 0
     for qa in qa_list:
+        if n_qa_per_chart is not None and n_kept >= n_qa_per_chart:
+            break
         if not isinstance(qa, dict) or "question" not in qa or "answer" not in qa:
             continue
-        if not verify_qa(qa):
-            continue
 
+        # Numeric answers: verify arithmetic and round
+        ans_str = str(qa["answer"]).replace(",", "").replace("%", "").strip()
         try:
-            qa["answer"] = round(float(str(qa["answer"]).replace(",", "").replace("%", "")), 2)
+            qa["answer"] = round(float(ans_str), 2)
+            if not skip_verify and not verify_qa(qa):
+                continue
         except (ValueError, TypeError):
-            continue
+            # Text answer: keep as-is (skip verify_qa which checks arithmetic)
+            qa["answer"] = str(qa["answer"]).strip()
 
         key = f"{chart.get('slug', '')}_{qa['question'][:50]}"
         qa.update({
@@ -88,6 +106,7 @@ async def generate_one(client, chart, lock, out_f, written_keys, stats, prompt_t
             "image_path": chart.get("image_path", ""),
             "source": chart.get("source", ""),
             "chart_slug": chart.get("slug", ""),
+            "qa_type": qa_type,
             "verified": True,
         })
 
@@ -97,6 +116,7 @@ async def generate_one(client, chart, lock, out_f, written_keys, stats, prompt_t
                 out_f.write(json.dumps(qa, ensure_ascii=False, default=str) + "\n")
                 out_f.flush()
                 stats["new_qa"] += 1
+                n_kept += 1
 
 
 async def run_generate(args):
@@ -134,7 +154,8 @@ async def run_generate(args):
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     out_f = open(args.output, "a")
-    tasks = [generate_one(client, c, lock, out_f, written_keys, stats, prompt_text)
+    tasks = [generate_one(client, c, lock, out_f, written_keys, stats, prompt_text,
+                          qa_type=args.prompt, n_qa_per_chart=args.n_qa_per_chart)
              for c in pending]
 
     pbar = tqdm(total=len(tasks), desc=f"QA Gen ({args.prompt})", unit="chart")
@@ -173,7 +194,9 @@ async def run_filter(args):
     print(f"Loaded {len(qa_pairs)} QAs for difficulty filtering", flush=True)
 
     hosts = args.hosts.split(",") if args.hosts else None
-    client = MultiHostClient(hosts=hosts, max_concurrent_per_host=args.max_concurrent_per_host)
+    model = getattr(args, 'model', None)
+    client = MultiHostClient(hosts=hosts, max_concurrent_per_host=args.max_concurrent_per_host,
+                              model=model)
     num_attempts = args.num_attempts
 
     _counter = {"n": 0}
@@ -194,7 +217,7 @@ async def run_filter(args):
                     {"role": "system", "content": "You are a chart analyst. Answer using the data. Put answer in [answer][/answer] tags."},
                     {"role": "user", "content": f"Data table:\n{csv_text}\n\nQuestion: {qa['question']}"},
                 ],
-                max_tokens=500, temperature=0.3,
+                # max_tokens omitted: vLLM auto = max_model_len - prompt_tokens
                 extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
             raw = resp.choices[0].message.content or ""
@@ -249,7 +272,11 @@ def main():
     gen = sub.add_parser("generate", help="Generate QA pairs from charts")
     gen.add_argument("--eligible", required=True, help="Path to eligible charts JSON")
     gen.add_argument("--output", default="data/generated_qa.jsonl")
-    gen.add_argument("--prompt", default="numeric", choices=["numeric", "text", "template", "scientific", "edge_case"])
+    gen.add_argument("--prompt", default="numeric",
+                     choices=["numeric", "text", "template", "scientific", "edge_case",
+                              "sci_ranking", "sci_numeric", "sci_trend", "sci_compare"])
+    gen.add_argument("--n_qa_per_chart", type=int, default=None,
+                     help="Cap QAs kept per chart (None = keep all from LLM response)")
     gen.add_argument("--hosts", default=None, help="Comma-separated host URLs")
     gen.add_argument("--max_concurrent_per_host", type=int, default=ONPREM_MAX_CONCURRENT_PER_HOST)
 
@@ -259,6 +286,7 @@ def main():
     filt.add_argument("--output", required=True, help="Output JSONL")
     filt.add_argument("--num_attempts", type=int, default=5)
     filt.add_argument("--hosts", default=None)
+    filt.add_argument("--model", default=None, help="Model name override (for local servers)")
     filt.add_argument("--max_concurrent_per_host", type=int, default=ONPREM_MAX_CONCURRENT_PER_HOST)
 
     args = parser.parse_args()

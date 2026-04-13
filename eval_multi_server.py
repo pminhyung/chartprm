@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 
 from chartvr.extraction import relaxed_accuracy, extract_answer
 from chartvr.prompts import EVAL_SYSTEM_PROMPT as SYSTEM_PROMPT
+from chartvr.config import SAMPLING_PARAMS
 
 BASE = os.environ.get("CHARTVR_ROOT", "/ex_disk2/mhpark/poc/chartvr")
 
@@ -81,7 +82,7 @@ def load_done_ids(out_path):
     return done
 
 
-async def run_eval(benchmark_name, server_urls, model_id, output_dir):
+async def run_eval(benchmark_name, server_urls, model_id, output_dir, sampling_params=None):
     samples = load_benchmark(benchmark_name)
     os.makedirs(output_dir, exist_ok=True)
     out_path = os.path.join(output_dir, f"{benchmark_name}.jsonl")
@@ -126,13 +127,25 @@ async def run_eval(benchmark_name, server_urls, model_id, output_dir):
                 ]}
             ]
             try:
+                sp = sampling_params or {}
+                extra = {"chat_template_kwargs": {"enable_thinking": True}}
+                for k in ("top_k", "min_p", "repetition_penalty"):
+                    if k in sp:
+                        extra[k] = sp[k]
                 resp = await client.chat.completions.create(
                     model=model_id,
                     messages=messages,
-                    max_tokens=4096,
-                    temperature=0.0,
+                    # max_tokens omitted: vLLM auto uses (max_model_len - prompt_tokens).
+                    # Previously max_tokens=4096 caused silent mid-thinking truncation
+                    # at eval time when reasoning_content exceeded ~4096 tokens, producing
+                    # the v9.1 runaway (44.8% empty content). With max_model_len=8192 and
+                    # prompt ~2000 tokens, removing this lets student generate up to ~6000
+                    # tokens for thinking + answer — sufficient for complex CharXiv queries.
+                    temperature=sp.get("temperature", 0.6),
+                    top_p=sp.get("top_p", 0.95),
+                    presence_penalty=sp.get("presence_penalty", 0.0),
                     stop=["</answer>"],
-                    extra_body={"chat_template_kwargs": {"enable_thinking": True}},
+                    extra_body=extra,
                 )
                 content = resp.choices[0].message.content or ""
                 raw = resp.choices[0].message.model_dump() if hasattr(resp.choices[0].message, 'model_dump') else {}
@@ -192,16 +205,27 @@ async def run_eval(benchmark_name, server_urls, model_id, output_dir):
 
 
 async def main():
-    ports = [int(p) for p in sys.argv[1].split(",")]
-    model_id = sys.argv[2]
-    output_dir = sys.argv[3]
-    benchmarks = sys.argv[4].split(",")
+    import argparse
+    parser = argparse.ArgumentParser(description="Multi-server chart eval")
+    parser.add_argument("ports", help="Comma-separated ports (e.g., 8002,8003,8004)")
+    parser.add_argument("model_id", help="Model path or ID")
+    parser.add_argument("output_dir", help="Output directory for results")
+    parser.add_argument("benchmarks", help="Comma-separated benchmark names")
+    parser.add_argument("--model_size", choices=["4b", "9b"], default="4b",
+                        help="Model size for sampling params")
+    args = parser.parse_args()
 
+    ports = [int(p) for p in args.ports.split(",")]
     server_urls = [f"http://localhost:{p}/v1" for p in ports]
+    benchmarks = args.benchmarks.split(",")
+
+    # Thinking mode + coding/reasoning → thinking_coding params
+    sp = SAMPLING_PARAMS[args.model_size]["thinking_coding"]
+    print(f"Sampling params ({args.model_size}, thinking_coding): {sp}")
 
     for bench in benchmarks:
         print(f"\n{'='*60}")
-        await run_eval(bench, server_urls, model_id, output_dir)
+        await run_eval(bench, server_urls, args.model_id, args.output_dir, sampling_params=sp)
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ async def verify_one_qa(
                     )},
                 ],
                 temperature=0.0,
-                max_tokens=1024,
+                # max_tokens omitted: vLLM auto = max_model_len - prompt_tokens
                 extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
             raw = resp.choices[0].message.content or "{}"

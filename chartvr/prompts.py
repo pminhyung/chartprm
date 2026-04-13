@@ -72,6 +72,69 @@ QA_SCIENTIFIC_PROMPT = (
     "Data table:\n"
 )
 
+# ── Block C scientific sub-prompts (v9.1) ──
+# Each sub-prompt has EXACTLY ONE answer type to avoid the numeric/text
+# contradiction present in QA_SCIENTIFIC_PROMPT (which forced numeric answers
+# on trend/ranking questions). Use these for Block C regeneration.
+
+QA_SCI_RANKING_PROMPT = (
+    "Generate exactly 1 ranking question as JSON array from this scientific data table.\n"
+    "Ask which entity/method/category/variable ranks highest, lowest, best, worst, "
+    "second-best, or has the largest gap/difference.\n"
+    "\n"
+    "CRITICAL RULES:\n"
+    "- The answer MUST be the NAME (text string) of the winning entity — NEVER a number.\n"
+    "- Use EXACT names from column headers or categorical column values in the table.\n"
+    "- If no categorical entities exist in the table, ask about the column name instead "
+    "(e.g., 'Which metric has the highest average?').\n"
+    "\n"
+    'Format: [{"question":"...","answer":"<entity name as text string>","answer_type":"text","difficulty":"medium|hard","reasoning_steps":["Step 1: ...","Step 2: ..."]}]\n\n'
+    "Data table:\n"
+)
+
+QA_SCI_NUMERIC_PROMPT = (
+    "Generate exactly 1 numeric lookup/computation question as JSON array from this scientific table.\n"
+    "Ask for a specific cell value, count, percentage, or simple calculation.\n"
+    "\n"
+    "CRITICAL RULES:\n"
+    "- The answer MUST be a NUMBER derived directly from or computed from the exact table values.\n"
+    "- Round to at most 2 decimal places. Any real range is valid (negative, small, large).\n"
+    "- NEVER ask trend/direction questions (those belong in sci_trend).\n"
+    "- NEVER ask 'which entity' questions (those belong in sci_ranking).\n"
+    "\n"
+    'Format: [{"question":"...","answer":<number>,"answer_type":"numeric","difficulty":"hard|very_hard","reasoning_steps":["Read ...","Compute ..."]}]\n\n'
+    "Data table:\n"
+)
+
+QA_SCI_TREND_PROMPT = (
+    "Generate exactly 1 trend/pattern question as JSON array from this scientific table.\n"
+    "Ask about the direction, shape, relationship, or correlation of the data.\n"
+    "\n"
+    "CRITICAL RULES:\n"
+    "- The answer MUST be a short TEXT phrase (2-6 words) — NEVER a number.\n"
+    "- Valid answers include: 'increasing', 'decreasing', 'plateau', 'positively correlated', "
+    "'inversely related', 'converging', 'diverging', 'oscillating', 'exponential growth', "
+    "'linear decay', 'no clear trend'.\n"
+    "- Base the answer on the actual data values in the table.\n"
+    "\n"
+    'Format: [{"question":"...","answer":"<short text phrase>","answer_type":"text","difficulty":"medium|hard","reasoning_steps":["Observe ...","Conclude ..."]}]\n\n'
+    "Data table:\n"
+)
+
+QA_SCI_COMPARE_PROMPT = (
+    "Generate exactly 1 comparison question as JSON array from this scientific table.\n"
+    "Ask 'by how much does A outperform B', 'what is the ratio of A to B', "
+    "'what is the difference between X and Y', or 'what is the gap at condition Z'.\n"
+    "\n"
+    "CRITICAL RULES:\n"
+    "- The answer MUST be a NUMBER (difference, ratio, or percentage) computed from exact table values.\n"
+    "- Show the two values being compared in reasoning_steps.\n"
+    "- Round to at most 2 decimal places.\n"
+    "\n"
+    'Format: [{"question":"...","answer":<number>,"answer_type":"numeric","difficulty":"hard|very_hard","reasoning_steps":["A = ...","B = ...","A - B = ..."]}]\n\n'
+    "Data table:\n"
+)
+
 QA_EDGE_CASE_PROMPT = (
     "Generate exactly 3 edge-case QA pairs from this data table.\n"
     "Include:\n"
@@ -85,14 +148,52 @@ QA_EDGE_CASE_PROMPT = (
 )
 
 
+# ── CoT Generation prompts (v9) ──
+
+QA_COT_WITH_QA_PROMPT = (
+    "Look at this chart and its underlying data.\n"
+    "Generate 3 diverse questions with step-by-step reasoning.\n\n"
+    "Requirements:\n"
+    "- At least 1 question requiring multi-step numerical reasoning\n"
+    "- At least 1 question with a textual answer (entity name, Yes/No)\n"
+    "- Each answer must include a concise reasoning trace (3-8 steps)\n"
+    "- Reasoning must reference specific values from the chart\n\n"
+    "Data table:\n{data_table}\n\n"
+    "Output format (strict JSON array):\n"
+    '[{{"question":"...","answer":"...","reasoning_steps":["Step 1: ...","Step 2: ...","The answer is ..."]}}]\n\n'
+    "Data table:\n"
+)
+
+QA_COT_REVERSE_PROMPT = (
+    "You are given a chart image, a question, and the correct answer. "
+    "Write a concise step-by-step reasoning that arrives at this answer.\n\n"
+    "Question: {question}\n"
+    "Correct answer: {answer}\n\n"
+    "Write reasoning in this format:\n"
+    "Step 1: [identify relevant data]\n"
+    "Step 2: [extract specific values]\n"
+    "Step 3: [perform calculation or comparison]\n"
+    "[additional steps if needed]\n"
+    "The answer is {answer}.\n\n"
+    "Keep reasoning to 3-8 steps. Reference specific values from the chart.\n"
+    "Output ONLY the reasoning steps, nothing else."
+)
+
 # ── Prompt selector ──
 
 _PROMPTS = {
     "numeric": QA_NUMERIC_PROMPT,
     "text": QA_TEXT_PROMPT,
     "template": QA_TEMPLATE_PROMPT,
-    "scientific": QA_SCIENTIFIC_PROMPT,
+    "scientific": QA_SCIENTIFIC_PROMPT,  # deprecated: has numeric/text contradiction, use sci_* instead
     "edge_case": QA_EDGE_CASE_PROMPT,
+    "cot_with_qa": QA_COT_WITH_QA_PROMPT,
+    "cot_reverse": QA_COT_REVERSE_PROMPT,
+    # Block C v9.1 sub-prompts
+    "sci_ranking": QA_SCI_RANKING_PROMPT,
+    "sci_numeric": QA_SCI_NUMERIC_PROMPT,
+    "sci_trend":   QA_SCI_TREND_PROMPT,
+    "sci_compare": QA_SCI_COMPARE_PROMPT,
 }
 
 

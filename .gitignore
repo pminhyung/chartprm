@@ -12,3 +12,6 @@ core.*
 llama-factory/
 bigcharts-r1/
 __pycache__/
+.harness/
+docs/active
+docs/reference

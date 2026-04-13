@@ -171,13 +171,11 @@ class VerifierClient:
         self,
         base_url: str = "http://10.1.211.148:8000/v1",
         model_id: str = "Qwen3.5-397B-A17B-FP8",
-        max_tokens: int = 1024,
         temperature: float = 0.0,
         max_concurrent: int = 8,
     ):
         self.client = AsyncOpenAI(base_url=base_url, api_key="dummy")
         self.model_id = model_id
-        self.max_tokens = max_tokens
         self.temperature = temperature
         self.max_concurrent = max_concurrent
 
@@ -198,7 +196,7 @@ class VerifierClient:
                         )},
                     ],
                     temperature=self.temperature,
-                    max_tokens=self.max_tokens,
+                    # max_tokens omitted: vLLM auto = max_model_len - prompt_tokens
                     extra_body={
                         "chat_template_kwargs": {"enable_thinking": False},
                     },
@@ -264,7 +262,7 @@ class VerifierClient:
                         reasoning=reasoning[:3000],
                     )},
                 ],
-                max_tokens=5,
+                # max_tokens omitted: vLLM auto = max_model_len - prompt_tokens
                 temperature=0.0,
                 extra_body={
                     "chat_template_kwargs": {"enable_thinking": False},

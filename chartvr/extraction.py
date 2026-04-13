@@ -1,4 +1,4 @@
-"""Answer extraction and accuracy metrics (v3).
+"""Answer extraction and accuracy metrics (v4).
 
 Single canonical implementation — all other files should import from here.
 """
@@ -35,6 +35,45 @@ def cerm_accuracy(pred: str, gold: str) -> float:
         return 1.0 / (1.0 + relative_change)
     except ValueError:
         return 1.0 if p.lower() == g.lower() else 0.0
+
+
+def _is_numeric_answer(answer: str) -> bool:
+    """Check if answer is numeric (float-convertible). Yes/No → False."""
+    s = answer.strip().lower()
+    if s in ('yes', 'no', 'true', 'false', 'n/a', 'none', ''):
+        return False
+    s = re.sub(r'[,%$]', '', s).strip()
+    s = re.sub(r'\s*(billion|million|thousand|trillion|percent|k|M|B|T)$', '', s, flags=re.I).strip()
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def relaxed_text_match(pred: str, gold: str) -> float:
+    """Relaxed text matching for non-numeric answers.
+    Returns 1.0 on match, 0.0 otherwise.
+
+    Priority: exact (case-insensitive) → gold in pred → Yes/No normalization.
+    """
+    p = pred.strip().lower()
+    g = gold.strip().lower()
+    if not p or not g:
+        return 0.0
+    # Exact match
+    if p == g:
+        return 1.0
+    # Gold substring in pred (short gold answers like "Yes", "China")
+    if len(g) < 50 and g in p:
+        return 1.0
+    # Yes/No normalization
+    yn_map = {'yes': 'yes', 'no': 'no', 'true': 'yes', 'false': 'no'}
+    pn = yn_map.get(p.split()[0] if p.split() else '', '')
+    gn = yn_map.get(g.split()[0] if g.split() else '', '')
+    if pn and gn and pn == gn:
+        return 1.0
+    return 0.0
 
 
 def _normalize(answer):
