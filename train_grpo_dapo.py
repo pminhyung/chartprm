@@ -316,6 +316,96 @@ def reward_conditional_v2(completions, answer, csv_path="", question="",
     return results
 
 
+def reward_vapv_v2(completions, answer, csv_path="", question="",
+                   verifier_type="rule", max_completion_length=4096, **kwargs) -> List[float]:
+    """V2 VAPV reward — niche-targeted process supervision.
+
+    Differences from conditional_v2 (driven by inverse-flip n=196 + r3only n=200
+    diagnosis):
+      • No silent CSV fallback — no CSV → outcome-only (binary text/numeric match)
+      • Anchored grounding via compute_vapv_v2 (denominator-aware, entity-windowed)
+      • Length scaling — process · (1 - (think_len/max_len)^2) penalises bloat
+      • Wrong-answer floor removed: wrong + process → 0.0 + 0.05·process (was 0.15+0.30·)
+      • Multi-step gate via kwargs['is_multi_step'] (default True for back-compat).
+        Single-fact samples → outcome only even if numeric+CSV.
+    """
+    if isinstance(answer, str):
+        answer = [answer] * len(completions)
+    if isinstance(csv_path, str):
+        csv_path = [csv_path] * len(completions)
+    if isinstance(question, str):
+        question = [question] * len(completions)
+    is_multi_step = kwargs.get('is_multi_step')
+    if is_multi_step is None:
+        is_multi_step = [True] * len(completions)
+    elif isinstance(is_multi_step, bool):
+        is_multi_step = [is_multi_step] * len(completions)
+
+    from code.rewards.rule_verifier_fast import compute_vapv_v2
+
+    results, r_acc_list, r_proc_list = [], [], []
+    n_correct = n_aug_proc = n_outcome_only = n_text = 0
+    think_lengths, length_factors = [], []
+
+    for comp, gold, csv, q, ms in zip(completions, answer, csv_path, question, is_multi_step):
+        resp = comp[0]["content"] if comp else ""
+        pred = extract_answer_v2(resp)
+        gold_str = str(gold)
+
+        m_think = re.search(r'<think>(.*?)</think>', resp, re.DOTALL)
+        if m_think:
+            think_lengths.append(len(m_think.group(1).split()))
+        elif '</think>' in resp:
+            think_lengths.append(len(resp[:resp.index('</think>')].split()))
+        else:
+            think_lengths.append(0)
+
+        if not _is_numeric_answer(gold_str):
+            r = relaxed_text_match(pred, gold_str)
+            results.append(r); r_acc_list.append(r); r_proc_list.append(0.0)
+            length_factors.append(1.0); n_text += 1
+            continue
+        if not csv or not ms:
+            # No CSV or single-fact → outcome only (binary numeric match)
+            r = cerm_accuracy(pred, gold_str)
+            results.append(1.0 if r >= 0.95 else 0.0)
+            r_acc_list.append(r); r_proc_list.append(0.0)
+            length_factors.append(1.0); n_outcome_only += 1
+            continue
+
+        r_acc = cerm_accuracy(pred, gold_str)
+        if r_acc >= 0.95:
+            results.append(1.0); r_acc_list.append(r_acc); r_proc_list.append(1.0)
+            length_factors.append(1.0); n_correct += 1
+            continue
+
+        # Wrong but numeric+CSV+multi-step → small process bonus, no floor
+        process, info = compute_vapv_v2(resp, csv, max_completion_length=max_completion_length)
+        r_total = 0.05 * process  # was: 0.15 + 0.30·process (V1)
+        results.append(r_total)
+        r_acc_list.append(r_acc); r_proc_list.append(process)
+        length_factors.append(info["length_factor"])
+        n_aug_proc += 1
+
+    _batch_counter["n"] += 1
+    _metrics_logger.info(json.dumps({
+        "batch": _batch_counter["n"],
+        "reward_type": "vapv_v2",
+        "reward_mean": float(np.mean(results)),
+        "reward_std": float(np.std(results)),
+        "r_acc_mean": float(np.mean(r_acc_list)),
+        "r_proc_mean": float(np.mean(r_proc_list)) if r_proc_list else 0,
+        "length_factor_mean": float(np.mean(length_factors)) if length_factors else 0,
+        "frac_correct": n_correct / len(results) if results else 0,
+        "frac_aug_proc": n_aug_proc / len(results) if results else 0,
+        "frac_outcome_only": n_outcome_only / len(results) if results else 0,
+        "frac_text": n_text / len(results) if results else 0,
+        "avg_think_tokens": float(np.mean(think_lengths)) if think_lengths else 0,
+        "n_completions": len(results),
+    }))
+    return results
+
+
 def _reward_conditional_v2_masked(completions, answer, csv_path, question,
                                   verifier_type, mode, tag):
     """Generic helper for VAPV component ablation.
@@ -660,6 +750,7 @@ def main():
         "conditional_v2_value_only", "conditional_v2_arith_only",  # VAPV ablation
         "conditional_v3",  # v9 multiplicative fix
         "grounding_only", "additive_v6",  # v8 ablation
+        "vapv_v2",  # v10 main: anchored grounding + length scaling + no floor
     ], default="outcome_only")
     parser.add_argument("--algo", choices=["dapo", "grpo"], default="dapo",
                         help="RL loss type — DAPO (default) or vanilla GRPO (for Row 5 ablation)")
@@ -702,9 +793,17 @@ def main():
             "conditional_v3": reward_conditional_v3,
             "grounding_only": reward_grounding_only,
             "additive_v6": reward_additive_v6,
+            "vapv_v2": reward_vapv_v2,
         }
         base_fn = fn_map[args.reward_type]
+        max_len_for_reward = args.max_completion_length
         def reward_fn(completions, answer, csv_path="", question="", **kw):
+            if args.reward_type == "vapv_v2":
+                return base_fn(
+                    completions, answer, csv_path, question,
+                    verifier_type=verifier_type,
+                    max_completion_length=max_len_for_reward, **kw,
+                )
             return base_fn(
                 completions, answer, csv_path, question,
                 verifier_type=verifier_type, **kw,
