@@ -144,7 +144,8 @@ async def run_eval(benchmark_name, server_urls, model_id, output_dir, sampling_p
                     temperature=sp.get("temperature", 0.6),
                     top_p=sp.get("top_p", 0.95),
                     presence_penalty=sp.get("presence_penalty", 0.0),
-                    stop=["</answer>"],
+                    # stop=["</answer>"] removed 2026-04-30 — interfered with
+                    # normal reasoning (mid-think commit / example echo truncation).
                     extra_body=extra,
                 )
                 content = resp.choices[0].message.content or ""

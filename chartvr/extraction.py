@@ -1,6 +1,13 @@
-"""Answer extraction and accuracy metrics (v4).
+"""Answer extraction and accuracy metrics (v5).
 
 Single canonical implementation — all other files should import from here.
+
+v5 (2026-04-30): Restrict <answer>...</answer> matching to text AFTER </think>.
+Fixes "in-think example leak" where models echoing the system-prompt example
+(e.g. <answer>42</answer> from EVAL_SYSTEM_PROMPT) caused false-positive extraction
+when content was empty and rescore_eval.py fell back to reasoning_content.
+Net effect: when model never closes <answer> after </think>, returns "" (correctly
+counted as wrong) rather than parsing the in-prompt example.
 """
 import re
 
@@ -119,31 +126,37 @@ def _normalize(answer):
 
 
 def extract_answer(response):
-    """Extract answer from model response (v3).
+    """Extract answer from model response (v5).
 
-    Priority: \\boxed{} → <answer>...</answer> → unclosed <answer> →
-              post-</think> content → last line.
+    Logic:
+      1. If </think> present, search ONLY in post-</think> text (skip in-think
+         example mentions like the system-prompt's <answer>42</answer>).
+      2. If <think> opened but no </think>, reasoning incomplete → return "".
+      3. Otherwise (no think tags), search whole response.
+
+    Within search scope: \\boxed{} → <answer>...</answer> → unclosed <answer> → last line.
     """
     if not response:
         return ""
-    m = re.search(r'\\boxed\{(.*?)\}', response)
+
+    # Determine search scope (v5: in-think filter)
+    if '</think>' in response:
+        search_text = response.rsplit('</think>', 1)[1].strip()
+        if not search_text:
+            return ""
+    elif '<think>' in response:
+        return ""
+    else:
+        search_text = response
+
+    m = re.search(r'\\boxed\{(.*?)\}', search_text)
     if m:
         return _normalize(m.group(1).strip())
-    m = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL | re.IGNORECASE)
+    m = re.search(r'<answer>(.*?)</answer>', search_text, re.DOTALL | re.IGNORECASE)
     if m:
         return _normalize(m.group(1).strip())
-    # Handle unclosed <answer> tag (e.g. when stop=["</answer>"] truncates it)
-    m = re.search(r'<answer>(.*?)$', response, re.DOTALL | re.IGNORECASE)
+    m = re.search(r'<answer>(.*?)$', search_text, re.DOTALL | re.IGNORECASE)
     if m and m.group(1).strip():
         return _normalize(m.group(1).strip())
-    if '</think>' in response:
-        after = response.split('</think>')[-1].strip()
-        if after:
-            m2 = re.search(r'<answer>(.*?)</answer>', after, re.DOTALL | re.IGNORECASE)
-            if m2:
-                return _normalize(m2.group(1).strip())
-            lines = [l.strip() for l in after.split('\n') if l.strip()]
-            if lines:
-                return _normalize(lines[-1])
-    lines = [l.strip() for l in response.strip().split('\n') if l.strip()]
+    lines = [l.strip() for l in search_text.split('\n') if l.strip()]
     return _normalize(lines[-1]) if lines else ""

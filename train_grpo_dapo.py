@@ -674,6 +674,8 @@ def main():
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
     parser.add_argument("--model_size", choices=["4b", "9b"], default="4b",
                         help="Model size for sampling params lookup")
+    parser.add_argument("--resume_from_checkpoint", default=None,
+                        help="Path to checkpoint dir to resume training from")
     args = parser.parse_args()
 
     # Ensure logs dir exists
@@ -831,7 +833,7 @@ def main():
         peft_config=peft_config,
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     trainer.save_model(args.output_dir)
     processor.save_pretrained(args.output_dir)
     print(f"Model saved to {args.output_dir}")

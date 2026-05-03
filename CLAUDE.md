@@ -2,6 +2,47 @@
 
 Chart-Verifiable Causal Rewards for Chart Reasoning via GRPO.
 
+## 응답 형식 (모든 답변 필수)
+
+모든 답변은 아래 **4-블록 보고 형식**을 따른다. 분석/디버깅/구현/조사 — 어떤 작업이든 동일.
+
+### 필수 4블록 (이 순서, 이 헤더 그대로 사용)
+
+**맥락**: 1–2줄. 상위 목표 + 최종 산출물.
+**이 스탭**: 1–2줄. 이 작업이 전체에서 무엇을 해소하는지 + 통과/완료 기준.
+**발견**: 3–6 bullet, 각 1줄. 사실/숫자/파일경로 위주. 정량 주장은 반드시 숫자. 결론 먼저 → 근거 한 줄.
+**액션**: 1–3 bullet. 구체 수정/검증 항목. 의사결정 필요 시 옵션 나열 후 **(추천)** 1개 + 근거 1줄. 마지막 줄에 유저 결정 필요 사항을 `결정 필요:` 로 명시.
+
+### 금지 (위반 시 답변 폐기 후 재작성)
+
+- ASCII 박스 표 (`┌─┐`, `├─┤`, `└─┘`) — 절대 금지. 표가 꼭 필요하면 markdown pipe table, **3열 × 4행 이하**.
+- 같은 사실을 표 + 문장으로 중복 기술
+- "본 보고서는…", "위와 같이 정리하면…", "분석한 결과…" 같은 메타·자기서술 문장
+- 결론 없는 나열, 액션 없는 분석, 숫자 없는 정량 주장
+- 코드/설정 dump — `file:line` 인용 + 핵심 5줄 이내 발췌만
+
+### 길이·톤
+
+- 일반 답변 **25줄 이내**, 깊은 분석 **50줄 이내**. 4블록 구조는 동일.
+- 표 비중 본문의 30% 이하.
+- 사실문으로. 불확실 시 `[추정]` `[미확인]` 태그 명시.
+- 코드 인용은 ` ``` ` fenced + path:line 헤더 1줄 + 5줄 이내.
+
+### 적용 예시 (이 형태로 답변할 것)
+
+```
+**맥락**: v8 eval 결과 신뢰도 검증 / 산출물: extraction fix + v7↔v8 fair 비교.
+**이 스탭**: empty content fallback 오류 원인 규명. 통과 기준: Row 4 AVG 가 v7_row_b 와 동일 stop 조건에서 비교 가능.
+**발견**:
+- v7(stop 없음) vs v8(stop=`</answer>`) 파이프라인 차이로 content 포맷 비대칭.
+- empty 원인 3종: (A) think runaway 30%, (B) prompt 예시 echo, (C) 조기 commit 50%+ — (C)는 `reasoning` 끝에 정답 생존.
+- `rescore_v5.py:reconstruct` 가 (C) 케이스 84/121건(69.4%) 죽임 — v5 자체 버그.
+**액션**:
+- (추천) F1+F2 = v6 extraction: `rescore_eval_v6.py` reconstruction 제거 + `extraction.py` 예시 mask. 5분, Row 3 학습 무관.
+- (중기) F3 prompt 추상화 + F4 v7 재평가는 paper main table 확정 시 일괄.
+**결정 필요**: v6 구현 진행할까요? (Y → F1+F2 즉시 패치)
+```
+
 ## 핵심 가이드 문서
 
 - **`docs/training_memory_reference.md`** — **학습 세팅 필수 참조**. 모델별/GPU별 메모리 테스트 결과, 추천 설정, OOM 방지. 학습 시 이 문서의 설정을 그대로 사용하거나 `train_grpo_dapo.py`의 현재 코드를 사용할 것.
@@ -118,6 +159,15 @@ done
 - 학습: `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7`
 
 ## Training (GRPO + LoRA)
+
+### vLLM Throughput Recipe (2026-04-28~)
+
+채택 config: **vLLM TP=4 (GPU 0-3) + train 4-rank ZeRO-3 (GPU 4-7)**, `effective_batch=32` 고정. step time 200s→139s (−30%).
+
+- 상세 recipe + 시도 실패 옵션: **`docs/reference/grpo_vllm_throughput.md`**
+- DP는 dense 모델에서 거부됨 (재시도 금지) — TP=N 사용
+- vLLM EngineCore 종료 확인은 `ps -eo pid,cmd | grep -iE 'vllm|EngineCore'` (pgrep으로는 자식 안 잡힘)
+- Resume: `--resume_from_checkpoint ckpt/<row>/checkpoint-<N>` 지원
 
 ### 원칙
 
