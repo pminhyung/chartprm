@@ -15,3 +15,6 @@ __pycache__/
 .harness/
 docs/active
 docs/reference
+.orchestrator_state/
+.claude/
+.worktrees/

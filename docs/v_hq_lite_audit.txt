@@ -1,0 +1,55 @@
+Total: 43744
+
+Image existence: 43744/43744 OK (0 missing)
+
+Source:
+  chartqa_train        18000 (41.1%)
+  scientific_ext        5188 (11.9%)
+  owid                  4985 (11.4%)
+  synthetic             4002 (9.1%)
+  scientific            3979 (9.1%)
+  plotly_complex        3011 (6.9%)
+  kaggle_like           2428 (5.6%)
+  additional            1420 (3.2%)
+  worldbank              731 (1.7%)
+
+Origin:
+  v8                   29549 (67.5%)
+  v9                   11017 (25.2%)
+  api                   3178 (7.3%)
+
+Answer type:
+  unspecified          34917 (79.8%)
+  numeric               3703 (8.5%)
+  text                  2692 (6.2%)
+  yesno                 1280 (2.9%)
+  multichoice           1117 (2.6%)
+  comparison              34 (0.1%)
+  text_comparison          1 (0.0%)
+
+Reasoning presence:
+  with_reasoning:    25744 (58.9%)
+  without_reasoning: 18000 (41.1%)
+
+Reasoning char length (non-empty only, n=25744):
+  min=27  p50=189  p90=374  p95=479  p99=1376  max=3628  mean=226
+
+Question char length (n=43744):
+  min=17  p50=70  p95=161  max=825  mean=79
+
+5 random samples:
+  [25247] src=chartqa_train        ans_type=          
+       q=What is the sum of the largest difference and the smallest difference in opinions between the two candidates?
+       ans=18  reason=
+  [27562] src=chartqa_train        ans_type=          
+       q=Search the blue bar value and find out which category is associated with 54% ?
+       ans=Connected car  reason=
+  [2653] src=scientific_ext       ans_type=          
+       q=By how much does the GNN method outperform the RNN method in terms of AUC?
+       ans=0.19  reason=Locate the AUC value for the GNN method, which is 0.87. / Locate the AUC value for the RNN method, which is 0.68. / Subt
+  [16968] src=scientific           ans_type=          
+       q=What is the difference between the highest and lowest Response (%)?
+       ans=91.53  reason=The maximum Response (%) is 98.75. / The minimum Response (%) is 7.22. / The difference is 98.75 - 7.22 = 91.53.
+  [33506] src=synthetic            ans_type=          
+       q=What percentage of the total Alpha does 2017 account for?
+       ans=28.2  reason=2017's Alpha: 85.0. / Total Alpha: 301.4. / Percentage = (85.0 / 301.4) × 100 = 28.2%.

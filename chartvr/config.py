@@ -113,4 +113,16 @@ SAMPLING_PARAMS = {
             "presence_penalty": 1.0,
         },
     },
+    # 27B VLM (judge + teacher distillation). User-supplied 2026-05-08.
+    # 2026-05-08: thinking temp 1.0 → 0.6 (over-thinking length-cap mitigation).
+    "27b": {
+        "thinking": {
+            "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0,
+            "presence_penalty": 0.0, "repetition_penalty": 1.0,
+        },
+        "instruct": {
+            "temperature": 0.7, "top_p": 0.80, "top_k": 20, "min_p": 0.0,
+            "presence_penalty": 1.5, "repetition_penalty": 1.0,
+        },
+    },
 }
