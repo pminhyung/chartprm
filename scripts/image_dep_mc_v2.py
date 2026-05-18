@@ -121,7 +121,12 @@ async def judge_remote(client, model, prompt, sem):
                 extra_body={"chat_template_kwargs":{"enable_thinking":False}})
             t = (resp.choices[0].message.content or "").strip().lower()
             if "verdict" in t:
-                return 1 if "correct" in t.split("verdict")[-1] else 0
+                suffix = t.split("verdict")[-1]
+                if "incorrect" in suffix:
+                    return 0
+                if "correct" in suffix:
+                    return 1
+                return None
             if t.startswith("yes"): return 1
             if t.startswith("no"): return 0
             return None
