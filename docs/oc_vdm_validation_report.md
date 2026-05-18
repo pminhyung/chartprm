@@ -112,7 +112,7 @@ if "verdict" in t:
 
 ### 2.3 Gate 1 — H1 (vd distribution) + H2 (Pattern distribution) 결과
 
-최종 측정 데이터 (bug fix 후, 11/12 combo 완료, chart_r1_chartqa_pro 진행 중):
+**최종 측정 데이터 (12/12 combo 완료, n=232 valid sample, n=970 step)**:
 
 | Combo | n_valid | steps | vd_std | vd_info% | PatA% | PatB% | PatC% | PatD% | PatE% | Kept% | H1 | H2 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
@@ -124,25 +124,28 @@ if "verdict" in t:
 | **qwen3vl_8b_thinking × charxiv** | **30** | **100** | **0.331** | **35.0%** | **29.0%** | **9.0%** | **18.0%** | **7.0%** | **37.0%** | **66.7%** | **✓** | **✓** |
 | chart_r1 × charxiv | 30 | 175 | 0.260 | 20.6% | 56.0% | 6.9% | 11.4% | 3.4% | 22.3% | 43.3% | ✓ | ✗ |
 | chartgemma × charxiv | 11† | 31 | 0.219 | 25.8% | 64.5% | 0.0% | 12.9% | 3.2% | 19.4% | 45.5% | ✓ | ✗ |
-| qwen3vl_4b × chartqa_pro | 1† | 1 | 0 | 0% | 100% | — | — | — | — | 0% | no signal | no signal |
-| qwen3vl_8b_thinking × chartqa_pro | 8/30 | 13 | 0 | 0% | 100% | — | — | — | — | 0% | no signal (so far) | — |
-| chartgemma × chartqa_pro | 15† | 15 | 0 | 0% | 100% | — | — | — | — | 0% | no signal | no signal |
+| qwen3vl_4b × chartqa_pro | 1† | 1 | 0 | 0% | 100% | 0% | 0% | 0% | 0% | 0% | no signal | no signal |
+| qwen3vl_8b_thinking × chartqa_pro | 30 | 51 | 0 | 0% | 100% | 0% | 0% | 0% | 0% | 0% | no signal | no signal |
+| chart_r1 × chartqa_pro | 13 | 16 | 0 | 0% | 100% | 0% | 0% | 0% | 0% | 0% | no signal | no signal |
+| chartgemma × chartqa_pro | 15† | 15 | 0 | 0% | 100% | 0% | 0% | 0% | 0% | 0% | no signal | no signal |
 
-† n limited by source-data step coverage (instruct models 1-word answers)
+† n limited by source-data step coverage (instruct models 1-word answers, chartgemma 1% step coverage on chartmuseum)
 
-**Gate 1 Summary**:
-- **H1 PASS: 4/4 charxiv combos** (모두 PASS — vd_std 0.21-0.33, vd_info 21-35%). chartmuseum 0/4, chartqa_pro 0/3.
-- **H2 PASS: 1/12 combo** (qwen3vl_8b_thinking × charxiv — full 4-axis PASS).
-- **H4 PASS: 5/12 combos** — 4 chartmuseum + 1 charxiv (8b_thinking).
-- **Bug fix 전 H1: 0/12 → 후 4/12** — engineering fix 가 cross-bench 결론 자체를 바꿈.
+**Gate 1 Summary** (12/12 final):
+- **H1 PASS: 4/12** — **모든 charxiv_reasoning combos** (vd_std 0.21-0.33, vd_info 21-35%). chartmuseum 0/4, chartqa_pro 0/4.
+- **H2 PASS: 1/12** — qwen3vl_8b_thinking × charxiv (the flagship combo, all 3 gates PASS).
+- **H4 PASS: 5/12 combos individually**, but **global kept 46.1% (FAIL ≥50%)** due to chartqa_pro 100% drop. Excluding chartqa_pro: global kept ≈ 60% (PASS).
+- **Bug fix impact**: H1 0/12 (with bug) → 4/12 (after fix). Engineering fix flipped the cross-bench conclusion.
 
-**핵심 비교** (bench mean of vd_info%, PatC%):
+**핵심 비교** (bench mean of vd_info%, PatC% across 4 combos each):
 
-| Bench | vd_info% (mean) | PatC% (mean) |
-|---|---:|---:|
-| chartmuseum (n=94) | ~14.8% | ~5.4% |
-| **charxiv_reasoning (n=79)** | **~25.8%** | **~12.7%** |
-| chartqa_pro (n=24) | 0% | 0% |
+| Bench | n combo | vd_info% (mean) | PatC% (mean) | OC-VDM 유효성 |
+|---|---:|---:|---:|---|
+| chartmuseum | 4 | 14.8% | 5.4% | weak — sparse signal |
+| **charxiv_reasoning** | **4** | **25.8%** | **12.7%** | **strong — primary target** |
+| chartqa_pro | 4 | 0% | 0% | inapplicable — no reasoning trace |
+
+**Surprise: chartqa_pro 도 thinking model 도 0 signal** — qwen3vl_8b_thinking_chartqa_pro 의 51 step 측정 결과 100% Pattern A. Verification-type (T/F) 질문은 sub-rollout 으로 부분 답안을 끌어내기 어려워 mc_with=mc_without=0 dominant.
 
 ### 2.4 Pedagogical 해석 — bench 별 OC-VDM 신호 강도가 왜 다른가?
 
@@ -175,33 +178,43 @@ chartmuseum, charxiv, chartqa_pro 모두 chart reasoning bench 이므로 OC-VDM 
 
 ### 2.5 Gate 2 — H3 (advantage modulation)
 
-759 step 시뮬레이션 결과 (lambda_vd=1.0, group_baseline_proxy=0.5):
+970 step 시뮬레이션 결과 (lambda_vd=1.0, group_baseline_proxy=0.5):
 
 | Pattern | n | mean_mod | mean_vd | mean_final_adv | H3 verdict |
 |---|---:|---:|---:|---:|---|
-| A_hard_impossible | 475 | 1.000× | +0.00 | −0.500 | **PASS** (mc_w=0 → base_adv 음수, 자연스러운 penalty) |
-| B_leakage | 18 | 0.972× | −0.42 | −0.182 | **n 부족** — wrong-sample subset 에서 base_adv>0 케이스 거의 없음 |
-| C_image_critical | 62 | **1.519×** | +0.62 | +0.379 | **PASS** (≥1.3× 충족) |
-| D_hard_perception | 52 | 1.000× | +0.17 | −0.333 | **PASS** (mc_w<0.3 → 약한 penalty 유지) |
-| E_other | 152 | 1.004× | +0.01 | −0.250 | — |
+| A_hard_impossible | 626 | 1.000× | +0.00 | −0.500 | **PASS** (mc_w=0 → base_adv 음수, 자연스러운 penalty) |
+| B_leakage | 29 | 0.977× | −0.39 | −0.184 | **n 부족** — wrong-sample subset 에서 base_adv>0 케이스 거의 없음 |
+| C_image_critical | 75 | **1.509×** | +0.62 | +0.392 | **PASS** (≥1.3× 충족) |
+| D_hard_perception | 56 | 1.000× | +0.17 | −0.333 | **PASS** (mc_w<0.3 → 약한 penalty 유지) |
+| E_other | 184 | 1.007× | +0.00 | −0.194 | — |
 
 **H3 결론**: C/A/D 패턴 모두 의도대로 modulation 작동. B 패턴은 wrong-sample subset 구조적 한계로 verdict 불가 — full GRPO 학습에서는 base_adv>0 trajectory 가 존재하므로 별개 measurement 필요.
 
 ### 2.6 Gate 3 — H4 (filter coverage)
 
-전체 9 combo (n=242) global filter outcome:
+전체 12 combo (n=232) global filter outcome:
 
 | Outcome | count | % |
 |---|---:|---:|
-| keep | 132 | 54.5% |
-| drop_hard_impossible | 75 | 31.0% |
-| drop_leakage | 7 | 2.9% |
-| drop_no_steps | 28 | 11.6% |
+| keep | 107 | 46.1% |
+| drop_hard_impossible | 100 | 43.1% |
+| drop_leakage | 25 | 10.8% |
 | drop_trivial | 0 | 0.0% |
 
-**H4 PASS** — global kept 54.5% (≥50%).
+**H4 FAIL (global ≥50% 기준)** — global kept **46.1%**, 임계 -3.9pp.
 
-Notable: charxiv 4 combo 평균 kept ~55%, chartmuseum 평균 ~70%. **charxiv 에 leakage 가 더 많이 감지** (chartgemma_chartmuseum 1 leakage vs charxiv 총 7).
+원인 분석:
+- chartqa_pro 4 combo (n=59) 모두 100% drop_hard_impossible → chartqa_pro 가 global 평균을 끌어내림
+- chartqa_pro 제외 시: n=173, kept ≈ 107/173 = **61.8% (PASS)**
+
+**Bench 별 kept%**:
+| Bench | mean kept% |
+|---|---:|
+| chartmuseum | ~65.8% |
+| charxiv_reasoning | ~48.3% (leakage 비율 높음 — 평균 23%) |
+| chartqa_pro | 0% (모두 drop) |
+
+**charxiv 에서 leakage 가 더 많이 감지됨** (25 leakage 중 17 in charxiv) — quantitative reasoning 에서 일부 step 의 prefix 가 partial answer 를 유출하는 경우 다수.
 
 ### 2.7 Verbatim 검증 — Pattern C 가 진짜 image-critical 인가?
 
@@ -317,10 +330,10 @@ step-coverage 가 0-15% 인 6 combo (chartqa_pro + chartmuseum chartgemma + char
 ### 5.1 측정 한계
 
 - **Wrong-sample subset only**: Pattern A 편향 + Pattern B 신호 약. Mini-GRPO 학습 데이터는 correct+wrong mix 필요.
-- **30 sample/combo (full 50 미달)**: 단일 vLLM 엔드포인트 (GPU 11, qwen3vl-4b-instruct policy) 시간 제약. 대안: TP=1 × N GPU 의 round-robin load balancing — GPU 4-7 가 점유되어 적용 못 함.
+- **30 sample/combo (full 50 미달)**: 단일 vLLM 엔드포인트 (GPU 11, qwen3vl-4b-instruct policy) 시간 제약. 대안: TP=1 × N GPU 의 round-robin load balancing — GPU 4-7 가 다른 사용자 점유로 적용 못 함.
 - **단일 정책 모델 (qwen3vl-4b-instruct)** 의 continuation 능력 기준. 다른 policy 모델 (8b-thinking 등) 으로 일반화는 별개 검증 필요.
-- **chartqa_pro & instruct-on-chartmuseum** combos 는 step-poor 데이터 — OC-VDM 적용 외부.
-- **chart_r1_charxiv (n=3 partial)**: full 30 sample 측정 미완. 진행 중 → 최종 분석에 통합 예정.
+- **chartqa_pro 전 combos 0 signal**: instruct/thinking 무관 verification (T/F) 질문에서 sub-rollout 이 부분 답안을 못 만들어 mc_with=mc_without=0 dominant. OC-VDM 적용 외부.
+- **chartmuseum chartgemma (n=4)** small-n combo: source data step coverage 1% → 측정 가능 sample 부족.
 
 ### 5.2 약속
 
@@ -379,4 +392,4 @@ python scripts/image_dep_mc_v2.py --models qwen3vl_4b,chartgemma \
 
 ---
 
-_End of report. chart_r1_charxiv (n=3 partial) 와 thinking-model chartqa_pro 측정 진행 중 — 최종 데이터 도착 시 §2.3 Gate 1 Summary 업데이트 예정._
+_End of report. **12/12 combo 측정 완료** (final samples=232 valid, n=970 step records). 결론 stable: charxiv reasoning-heavy bench 에서 OC-VDM 강함, chartmuseum sparse, chartqa_pro 적용 불가._
