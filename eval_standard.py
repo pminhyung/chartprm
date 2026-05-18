@@ -187,7 +187,7 @@ def _load_chartmuseum(split: str = "test", thinking: bool = True) -> list[dict]:
             "gold_answer": str(item["label"]),
             "prompt_text": ptext,
             "thinking": thinking,
-            "max_tokens": 16384 if thinking else 256,
+            "max_tokens": 8192 if thinking else 256,
             "temperature": 0.6 if thinking else 0.0,
             **({"top_p": 0.95} if thinking else {}),
             "scoring": "chartmuseum_judge",
@@ -262,9 +262,18 @@ async def _infer_sample(client: AsyncOpenAI, model_id: str, sample: dict) -> dic
 
 
 async def run_eval(bench: str, server_urls: list[str], model_id: str, out_dir: str,
-                   per_server_concurrency: int = 5, thinking: bool | None = None) -> None:
+                   per_server_concurrency: int = 5, thinking: bool | None = None,
+                   limit: int = 0, seed: int = 42, max_tokens_override: int = 0) -> None:
     loader = BENCH_LOADERS[bench]
     samples = loader(thinking) if thinking is not None else loader()
+    if limit and limit > 0 and len(samples) > limit:
+        import random as _rnd
+        rng = _rnd.Random(seed)
+        idx = sorted(rng.sample(range(len(samples)), limit))
+        samples = [samples[i] for i in idx]
+    if max_tokens_override > 0:
+        for s in samples:
+            s["max_tokens"] = min(s["max_tokens"], max_tokens_override)
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{bench}.jsonl")
 
@@ -321,6 +330,10 @@ async def main() -> None:
     p.add_argument("--host", default="localhost")
     p.add_argument("--thinking", choices=["on", "off", "default"], default="default",
                    help="Force thinking on/off across all benches; 'default' uses each bench's default")
+    p.add_argument("--limit", type=int, default=0, help="Subsample size per bench (0 = full)")
+    p.add_argument("--seed", type=int, default=42, help="Subsample seed")
+    p.add_argument("--max_tokens_override", type=int, default=0,
+                   help="Override max_tokens for all samples (0 = use bench default). Used for models with low max_position_embeddings.")
     args = p.parse_args()
 
     urls = [f"http://{args.host}:{port}/v1" for port in args.ports.split(",")]
@@ -336,7 +349,9 @@ async def main() -> None:
     else:
         flag = None
     for b in benches:
-        await run_eval(b, urls, args.model_id, args.output_dir, args.concurrency, flag)
+        await run_eval(b, urls, args.model_id, args.output_dir, args.concurrency, flag,
+                       limit=args.limit, seed=args.seed,
+                       max_tokens_override=args.max_tokens_override)
 
 
 if __name__ == "__main__":

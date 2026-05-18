@@ -1,0 +1,74 @@
+{
+  "chartqa_pro__qwen3vl_4b": {
+    "cf_total": 16,
+    "cf_no_answer_tag": 16,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 100.0
+  },
+  "chartqa_pro__qwen3vl_8b_thinking": {
+    "cf_total": 62,
+    "cf_no_answer_tag": 62,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 100.0
+  },
+  "chartqa_pro__chart_r1": {
+    "cf_total": 37,
+    "cf_no_answer_tag": 37,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 100.0
+  },
+  "chartqa_pro__chartgemma": {
+    "cf_total": 33,
+    "cf_no_answer_tag": 33,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 100.0
+  },
+  "charxiv_reasoning__qwen3vl_4b": {
+    "cf_total": 29,
+    "cf_no_answer_tag": 29,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 100.0
+  },
+  "charxiv_reasoning__qwen3vl_8b_thinking": {
+    "cf_total": 59,
+    "cf_no_answer_tag": 59,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 100.0
+  },
+  "charxiv_reasoning__chart_r1": {
+    "cf_total": 28,
+    "cf_no_answer_tag": 23,
+    "cf_with_answer_tag": 5,
+    "pct_no_answer": 82.14285714285714
+  },
+  "charxiv_reasoning__chartgemma": {
+    "cf_total": 8,
+    "cf_no_answer_tag": 8,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 100.0
+  },
+  "chartmuseum__qwen3vl_4b": {
+    "cf_total": 65,
+    "cf_no_answer_tag": 33,
+    "cf_with_answer_tag": 32,
+    "pct_no_answer": 50.76923076923077
+  },
+  "chartmuseum__qwen3vl_8b_thinking": {
+    "cf_total": 57,
+    "cf_no_answer_tag": 7,
+    "cf_with_answer_tag": 50,
+    "pct_no_answer": 12.280701754385966
+  },
+  "chartmuseum__chart_r1": {
+    "cf_total": 32,
+    "cf_no_answer_tag": 2,
+    "cf_with_answer_tag": 30,
+    "pct_no_answer": 6.25
+  },
+  "chartmuseum__chartgemma": {
+    "cf_total": 0,
+    "cf_no_answer_tag": 0,
+    "cf_with_answer_tag": 0,
+    "pct_no_answer": 0
+  }
+}

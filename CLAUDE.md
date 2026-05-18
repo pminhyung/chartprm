@@ -28,6 +28,27 @@ Chart-Verifiable Causal Rewards for Chart Reasoning via GRPO.
 - 사실문으로. 불확실 시 `[추정]` `[미확인]` 태그 명시.
 - 코드 인용은 ` ``` ` fenced + path:line 헤더 1줄 + 5줄 이내.
 
+### Pedagogical mode — when reporting analysis / experimental results
+
+**Trigger** (auto-engage when user signals lack of prior context):
+- explicit: "단계적", "차근차근", "쉽게", "다 읽지 않았어", "explain step by step"
+- implicit: user asks "왜 …", "어디가 문제", or shows they're new to the result
+
+**Expand the `발견` block into 4 labeled mini-sections** (other 3 blocks unchanged):
+
+1. **Hypothesis** — what we originally believed and why. Tie to the research goal in one line. Always name the assumption being tested.
+2. **Measurement** — what we set up to test it. For every metric, append `(what passing it would prove)` so the reader knows why the number matters before they see it.
+3. **Result** — raw numbers per metric, with PASS/FAIL vs target. Use the same metric names as §Measurement. Numbers only, no narrative here.
+4. **Diagnosis** — where the expectation broke. Include **2–3 verbatim data examples** (sample id + claim + gold + pred) before the conclusion. End with one line: `Hypothesis: X. Reality: Y. So {signal/method} is unviable for {goal}.`
+
+**Hard rules**:
+- Never dump metric names without explaining them on first appearance.
+- Never cite a result number without referencing the metric it came from in §Measurement.
+- No jargon that wasn't introduced in the same response (or `MEMORY.md`).
+- 50-line cap still applies (deep analysis).
+- 4-block frame (`맥락 / 이 스탭 / 발견 / 액션`) is non-negotiable — the expansion lives inside `발견`.
+- `액션` still ends with `결정 필요:` line.
+
 ### 적용 예시 (이 형태로 답변할 것)
 
 ```
@@ -57,13 +78,12 @@ Chart-Verifiable Causal Rewards for Chart Reasoning via GRPO.
 
 ## GPU 정책
 
-- GPUs 2-11: 사용 가능 (GRPO 학습 + vLLM)
-- GPUs 0-1, 12-15: 유저 허가 시에만 사용
+- **가용 GPU 전부 사용 가능** (0-15 제한 없음). `nvidia-smi`로 비어있는 GPU 확인 후 사용.
 - **절대 `nvidia-smi --gpu-reset` 실행 금지** — 다른 사용자 프로세스에 영향. zombie GPU memory 발생 시 유저에게 PID 기반 kill 커맨드를 제공할 것.
 - **절대 `fuser -k /dev/nvidia*` 실행 금지**
 - 프로세스 kill은 반드시 PID 기반으로만 (`kill <PID>`)
 - 좀비 GPU 메모리 발생 시 `nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader`로 PID 확인 후 유저에게 `kill -9 <PID>` 커맨드 제공. 직접 실행하지 않음.
-- 다른 사용자 GPU 프로세스 (GPU 8-15 등) 절대 건들지 않기
+- 다른 사용자 PID의 프로세스는 절대 kill하지 않음 — 메모리 사용 중인 GPU 회피
 
 ## Eval (벤치마크 추론)
 

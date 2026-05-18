@@ -1,0 +1,84 @@
+{
+  "chartqa_pro__qwen3vl_4b": {
+    "OTHER": 1,
+    "CATEGORY_SELECT": 9,
+    "Q_INTENT": 3,
+    "FORMAT_MISMATCH": 2,
+    "ARITHMETIC": 1
+  },
+  "chartqa_pro__qwen3vl_8b_thinking": {
+    "TRUNCATION": 54,
+    "FORMAT_MISMATCH": 2,
+    "Q_INTENT": 6
+  },
+  "chartqa_pro__chart_r1": {
+    "Q_INTENT": 3,
+    "OTHER": 2,
+    "FORMAT_MISMATCH": 8,
+    "TRUNCATION": 10,
+    "ARITHMETIC": 5,
+    "CATEGORY_SELECT": 9
+  },
+  "chartqa_pro__chartgemma": {
+    "CATEGORY_SELECT": 13,
+    "TRUNCATION": 5,
+    "ARITHMETIC": 6,
+    "Q_INTENT": 4,
+    "FORMAT_MISMATCH": 5
+  },
+  "charxiv_reasoning__qwen3vl_4b": {
+    "OTHER": 4,
+    "CATEGORY_SELECT": 19,
+    "ARITHMETIC": 4,
+    "TRUNCATION": 1,
+    "FORMAT_MISMATCH": 1
+  },
+  "charxiv_reasoning__qwen3vl_8b_thinking": {
+    "OTHER": 5,
+    "TRUNCATION": 33,
+    "FORMAT_MISMATCH": 1,
+    "CATEGORY_SELECT": 19,
+    "Q_INTENT": 1
+  },
+  "charxiv_reasoning__chart_r1": {
+    "CATEGORY_SELECT": 12,
+    "OTHER": 10,
+    "ARITHMETIC": 2,
+    "TRUNCATION": 1,
+    "Q_INTENT": 2,
+    "FORMAT_MISMATCH": 1
+  },
+  "charxiv_reasoning__chartgemma": {
+    "OTHER": 3,
+    "TRUNCATION": 1,
+    "CATEGORY_SELECT": 2,
+    "Q_INTENT": 1,
+    "ARITHMETIC": 1
+  },
+  "chartmuseum__qwen3vl_4b": {
+    "CATEGORY_SELECT": 44,
+    "OTHER": 5,
+    "ARITHMETIC": 6,
+    "Q_INTENT": 4,
+    "TRUNCATION": 6
+  },
+  "chartmuseum__chart_r1": {
+    "OTHER": 2,
+    "CATEGORY_SELECT": 23,
+    "ARITHMETIC": 4,
+    "Q_INTENT": 2,
+    "TRUNCATION": 1
+  },
+  "chartmuseum__qwen3vl_8b_thinking": {
+    "CATEGORY_SELECT": 46,
+    "ARITHMETIC": 7,
+    "OTHER": 2,
+    "Q_INTENT": 1,
+    "TRUNCATION": 1
+  },
+  "chartmuseum__chartgemma": {
+    "CATEGORY_SELECT": 6,
+    "ARITHMETIC": 1,
+    "OTHER": 1
+  }
+}
