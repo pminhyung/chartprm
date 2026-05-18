@@ -8,10 +8,10 @@ _Predecessor: `oc_vdm_validation_action_guide_2026-05-18.md` (action guide)_
 
 ## 0. TL;DR (4-line summary)
 
-1. **OC-VDM 핵심 가설은 작동한다** — Pattern C (image-critical) step 에서 mc_with > mc_without 이 명확히 분리되며, **62 개 Pattern C step 의 verbatim 검증에서 이미지 가린 sub-rollout 이 실제로 빗나간 답을 낸다**.
-2. **그러나 효과는 bench-specific** — charxiv_reasoning 에서 OC-VDM 신호가 강함 (qwen3vl_8b_thinking n=30: vd_std=0.331, vd_info=35%, PatC=18% → 모든 Gate PASS); chartmuseum 에서는 약함 (PatC 1-11%); chartqa_pro 에서는 측정 불가 (reasoning trace 부재).
-3. **Engineering 발견: judge parsing bug** — `"correct" in "Verdict: Incorrect"` substring 매칭 오류로 charxiv mc_value 가 모두 1.0 로 fake-passing. **fix 후** 차세대 charxiv 결과 신호가 정상 회복.
-4. **Decision**: mini-GRPO (R1-R4) 진행 권고 — **단, OC-VDM 학습/벤치를 reasoning-heavy 영역 (charxiv) 에 좁힘**. paper narrative 재정의 필요.
+1. **OC-VDM 핵심 가설은 작동한다** — Pattern C (image-critical) step n=62 의 verbatim 검증에서 5/5 random sample 이 모두 정상 분류 (image 가리면 답변 fabricated). Pattern C 평균 modulation 1.519× (H3 PASS).
+2. **효과는 bench-specific** — **charxiv_reasoning 4/4 combos H1 PASS** (vd_std 0.21-0.33, vd_info 21-35%) vs chartmuseum 0/4 (vd_info 6-25%, 신호 sparse) vs chartqa_pro 측정 불가 (reasoning trace 부재). **qwen3vl_8b_thinking × charxiv (n=30) 은 H1+H2+H4 모두 PASS** — 검증 대상 핵심 케이스.
+3. **Engineering 발견: judge parsing bug** — `"correct" in "Verdict: Incorrect"` substring 매칭 오류로 모든 charxiv mc_value 가 1.0 fake-pass. Bug fix 전 H1 0/12 → 후 4/12. Engineering robustness 가 paradigm validation 의 prerequisite.
+4. **Decision**: mini-GRPO (R1-R4) 진행 권고 — **단, OC-VDM 학습/벤치를 reasoning-heavy 영역 (charxiv-style multi-step quantitative) 에 좁힘**. policy 는 thinking-mode (qwen3vl-8b-thinking 또는 SFT-warmed 4b). paper narrative 를 "universal chart RL" 에서 "image-grounded multi-step reasoning RL" 로 재정의 필요.
 
 ---
 
@@ -112,27 +112,37 @@ if "verdict" in t:
 
 ### 2.3 Gate 1 — H1 (vd distribution) + H2 (Pattern distribution) 결과
 
-측정 데이터 (bug fix 후, 9/12 combo 완료, n=242 sample, ~759 step):
+최종 측정 데이터 (bug fix 후, 11/12 combo 완료, chart_r1_chartqa_pro 진행 중):
 
 | Combo | n_valid | steps | vd_std | vd_info% | PatA% | PatB% | PatC% | PatD% | PatE% | Kept% | H1 | H2 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
 | qwen3vl_4b × chartmuseum | 30 | 191 | 0.227 | 16.2% | 64.9% | 0.5% | 11.0% | 4.7% | 18.9% | 73.3% | ✗ | ✗ |
 | qwen3vl_8b_thinking × chartmuseum | 30 | 214 | 0.133 | 6.1% | 76.2% | 0.5% | 1.4% | 7.0% | 14.9% | 73.3% | ✗ | ✗ |
 | chart_r1 × chartmuseum | 30 | 149 | 0.185 | 12.1% | 63.8% | 3.4% | 4.0% | 10.1% | 18.8% | 66.7% | ✗ | ✗ |
-| chartgemma × chartmuseum | 4 | 4 | 0.138 | 25.0% | 50.0% | 0.0% | 25.0% | 25.0% | 0.0% | 50.0% | small n | small n |
-| qwen3vl_4b × charxiv | 8 | 23 | 0.207 | 21.7% | 52.2% | 4.3% | 8.7% | 8.7% | 26.1% | 37.5% | ✓ | ✗ |
+| chartgemma × chartmuseum | 4† | 4 | 0.138 | 25.0% | 50.0% | 0.0% | 25.0% | 25.0% | 0.0% | 50.0% | small n | small n |
+| qwen3vl_4b × charxiv | 8† | 23 | 0.207 | 21.7% | 52.2% | 4.3% | 8.7% | 8.7% | 26.1% | 37.5% | ✓ | ✗ |
 | **qwen3vl_8b_thinking × charxiv** | **30** | **100** | **0.331** | **35.0%** | **29.0%** | **9.0%** | **18.0%** | **7.0%** | **37.0%** | **66.7%** | **✓** | **✓** |
-| chart_r1 × charxiv | 3* | 13 | 0.324 | 38.5% | 53.9% | 0.0% | 30.8% | 0.0% | 15.4% | 66.7% | ✓ (small n) | small n |
-| chartgemma × charxiv | 11 | 31 | 0.219 | 25.8% | 64.5% | 0.0% | 12.9% | 3.2% | 19.4% | 45.5% | ✓ | ✗ |
-| qwen3vl_4b × chartqa_pro | 1 | 1 | 0 | 0% | 100% | — | — | — | — | 0% | no signal | no signal |
-| chartgemma × chartqa_pro | 15 | 15 | 0 | 0% | 100% | — | — | — | — | 0% | no signal | no signal |
+| chart_r1 × charxiv | 30 | 175 | 0.260 | 20.6% | 56.0% | 6.9% | 11.4% | 3.4% | 22.3% | 43.3% | ✓ | ✗ |
+| chartgemma × charxiv | 11† | 31 | 0.219 | 25.8% | 64.5% | 0.0% | 12.9% | 3.2% | 19.4% | 45.5% | ✓ | ✗ |
+| qwen3vl_4b × chartqa_pro | 1† | 1 | 0 | 0% | 100% | — | — | — | — | 0% | no signal | no signal |
+| qwen3vl_8b_thinking × chartqa_pro | 8/30 | 13 | 0 | 0% | 100% | — | — | — | — | 0% | no signal (so far) | — |
+| chartgemma × chartqa_pro | 15† | 15 | 0 | 0% | 100% | — | — | — | — | 0% | no signal | no signal |
 
-\* chart_r1_charxiv 측정 진행 중 (3/30)
+† n limited by source-data step coverage (instruct models 1-word answers)
 
 **Gate 1 Summary**:
-- **H1 PASS: 4/12 combos** (모두 charxiv_reasoning) — bug fix 전 0/12 → 4/12 큰 차이.
-- **H2 PASS: 1/12 combo** (qwen3vl_8b_thinking × charxiv) — high-coverage thinking-model on reasoning-heavy bench.
-- **H4 PASS: 6/12 combos** — 4 chartmuseum + 2 charxiv (thinking models).
+- **H1 PASS: 4/4 charxiv combos** (모두 PASS — vd_std 0.21-0.33, vd_info 21-35%). chartmuseum 0/4, chartqa_pro 0/3.
+- **H2 PASS: 1/12 combo** (qwen3vl_8b_thinking × charxiv — full 4-axis PASS).
+- **H4 PASS: 5/12 combos** — 4 chartmuseum + 1 charxiv (8b_thinking).
+- **Bug fix 전 H1: 0/12 → 후 4/12** — engineering fix 가 cross-bench 결론 자체를 바꿈.
+
+**핵심 비교** (bench mean of vd_info%, PatC%):
+
+| Bench | vd_info% (mean) | PatC% (mean) |
+|---|---:|---:|
+| chartmuseum (n=94) | ~14.8% | ~5.4% |
+| **charxiv_reasoning (n=79)** | **~25.8%** | **~12.7%** |
+| chartqa_pro (n=24) | 0% | 0% |
 
 ### 2.4 Pedagogical 해석 — bench 별 OC-VDM 신호 강도가 왜 다른가?
 
