@@ -56,7 +56,7 @@ async def mc_sub_rollout(policy_client, model, image_b64, question, prefix, K, s
             ]
             resp = await policy_client.chat.completions.create(
                 model=model, messages=messages,
-                temperature=0.7, top_p=0.95, max_tokens=1024, n=K,
+                temperature=0.7, top_p=0.95, n=K,
                 extra_body={"continue_final_message": True,
                             "add_generation_prompt": False,
                             "chat_template_kwargs":{"enable_thinking":False}})

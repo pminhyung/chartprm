@@ -33,7 +33,7 @@ async def mc_without_image(policy_client, model, question, prefix, K, sem):
             ]
             resp = await policy_client.chat.completions.create(
                 model=model, messages=messages,
-                temperature=0.7, top_p=0.95, max_tokens=1024, n=K,
+                temperature=0.7, top_p=0.95, n=K,
                 extra_body={"continue_final_message": True,
                             "add_generation_prompt": False,
                             "chat_template_kwargs":{"enable_thinking":False}})

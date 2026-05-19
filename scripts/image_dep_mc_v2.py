@@ -84,7 +84,7 @@ async def mc_rollout_with_image(client, model, image_b64, question, prefix, K, s
             ]
             resp = await client.chat.completions.create(
                 model=model, messages=messages,
-                temperature=0.7, top_p=0.95, max_tokens=1024, n=K,
+                temperature=0.7, top_p=0.95, n=K,
                 extra_body={"continue_final_message": True,
                             "add_generation_prompt": False,
                             "chat_template_kwargs":{"enable_thinking":False}})
@@ -103,7 +103,7 @@ async def mc_rollout_without_image(client, model, question, prefix, K, sem):
             ]
             resp = await client.chat.completions.create(
                 model=model, messages=messages,
-                temperature=0.7, top_p=0.95, max_tokens=1024, n=K,
+                temperature=0.7, top_p=0.95, n=K,
                 extra_body={"continue_final_message": True,
                             "add_generation_prompt": False,
                             "chat_template_kwargs":{"enable_thinking":False}})
@@ -234,7 +234,7 @@ async def process_sample(s, policy_client, policy_model, judge_client, judge_mod
 async def run_combo(model: str, bench: str, wrong_ids: list[str],
                     args, policy_client, judge_client, mc_sem, judge_sem):
     combo = f"{bench}__{model}"
-    out_path = BASE / f"data/d2_hardbench/reports/image_dep_12combo/{model}_{bench}.jsonl"
+    out_path = BASE / f"data/d2_hardbench/reports/image_dep_12combo_no_cap/{model}_{bench}.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     perception = load_perception(model, bench)
