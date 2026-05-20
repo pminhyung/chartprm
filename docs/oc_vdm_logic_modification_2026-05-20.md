@@ -6,18 +6,27 @@ _Predecessor: `oc_vdm_validation_report.md`_
 
 ---
 
-## 0. TL;DR — 6 actionable modifications, ordered by ROI
+## 0. TL;DR — patch 적용 후 measured outcome
 
-| # | Modification | 효과 | 비용 |
+| # | Modification | 적용 | 효과 (measured) |
 |---|---|---|---|
-| **M1** | Terminal step (k=n_steps-1) OC-VDM 측정 skip | chartmuseum 25/30 terminal=fake PatA 제거. charxiv PatC% 18%→21.4% | 0 (analyzer 1 line) |
-| **M2** | chartqa_pro 의 open-ended gold → judge LLM scoring | chartqa_pro 의 fake PatA 27.5% 회복 → OC-VDM 적용 영역 확장 | 30min (scorer 분기) |
-| **M3** | Pattern B threshold 강화 (`mc_w ≤ 0.3 AND vd ≤ -0.4`) | image-as-distractor false positive 제거 (chartmuseum 의 PatB 중 ~50% 가 prefix-already-correct 케이스) | 0 (분류 함수 수정) |
-| **M4** | Claim-density step pre-filter | "Wait/Let's" 류 exploration step skip → 측정 compute -30%, 신호 SNR ↑ | 1h (regex/heuristic) |
-| **M5** | Confidence-weighted modulation: `mod = 1 + λ·vd·min(mc_w, mc_wo+ε)` | marginal-noise PatB/C 약화, 양 branch 모두 비자명한 step 만 강조 | 0 (수식 1줄) |
-| **M6** | Question-type-adaptive routing: T/F → outcome-only, multi-step quantitative → full OC-VDM, visual-ID → confidence-weighted OC-VDM | bench-agnostic working logic 달성 (chartqa_pro 도 step-poor 케이스 학습 가능) | 2h (orchestration) |
+| **M1** | Terminal step (k=n_steps-1) OC-VDM 측정 skip | ✓ 적용 (`oc_vdm_analyze_v2.py`) | chartmuseum thinking PatC 1.4%→5.0%, charxiv 18%→21.4% |
+| **M2** | chartqa_pro open-ended gold → judge LLM scoring | ✓ 적용 (`rescore_chartqa_pro.py`, 15s total) | **chartqa_pro 0% → 20.2% mean** (qwen3vl_8b_thinking: 0→47.6%, chart_r1: 0→33.3%) |
+| **M3** | Pattern B threshold 강화 (`mc_wo≥0.7 AND mc_w≤0.3 AND vd≤-0.4`) | ✓ 적용 (`classify_v2`) | image-as-distractor false positive 제거; PatC% 우선 보존 |
+| ~~M4~~ | Claim-density pre-filter | SKIP — compute optimization only | — |
+| ~~M5 revised~~ | PatC 보존 + PatB만 confidence-weighted dampen | TODO mini-GRPO 학습 코드에서 | — |
+| ~~M6~~ | Question-type routing | SKIP — T/F 케이스 PatC 손실 위험 | — |
 
-**M1+M2+M3 만으로 chartmuseum 의 informative% 17.3% → ~22%, charxiv 38% → ~42% 예상. M4-M6 는 mini-GRPO 학습 단계에서 본격 도입 권장.**
+**Final measured result (12 combos mean)**: informative% **15.5% → 19.2%** (+3.7pp).
+
+**Per-bench mean informative% (positives 유지 + negatives 일반 raise)**:
+| Bench | OLD | NEW | Δ |
+|---|---:|---:|---:|
+| chartqa_pro | 0.0% | **20.2%** | **+20.2pp** ← 가장 일반적 raise |
+| charxiv_reasoning | 23.4% | 24.4% | +1.0pp |
+| chartmuseum (chartgemma n=4 제외) | 14.2% | 17.4% | +3.2pp |
+
+**Positive 보존 검증 — PatC% 11/12 combo 증가 또는 동일** (chartgemma_chartmuseum n=4 outlier 외).
 
 ---
 
@@ -317,4 +326,88 @@ def select_reward_strategy(sample):
 
 ---
 
-_End of modification proposal. mini-GRPO 진행 결정 시 M1+M2+M3 즉시 적용, M5+M6 학습 코드에 통합 권장._
+---
+
+## 6. Final 적용 결과 (2026-05-20 실측)
+
+### 6.1 12 combo 통합 표 (M1+M3 + M2 chartqa_pro only)
+
+| Combo | OLD info% | NEW info% | Δ | OLD PatC% | NEW PatC% | Positive 보존 |
+|---|---:|---:|---:|---:|---:|---|
+| qwen3vl_8b_thinking__chartqa_pro | 0.0% | **47.6%** | **+47.6** | 0.0% | 38.1% | N/A → 신규 PatC |
+| chart_r1__chartqa_pro | 0.0% | **33.3%** | +33.3 | 0.0% | 33.3% | N/A → 신규 PatC |
+| qwen3vl_4b__chartqa_pro | 0.0% | 0.0% | 0 | — | — | reasoning trace 부재 (n_steps<2) |
+| chartgemma__chartqa_pro | 0.0% | 0.0% | 0 | — | — | 동일 |
+| qwen3vl_8b_thinking__charxiv | 34.0% | 32.9% | −1.1 | 18.0% | **21.4%** | ✓ PatC ↑ |
+| chart_r1__charxiv | 21.7% | 17.9% | −3.8 | 11.4% | **13.8%** | ✓ PatC ↑ |
+| qwen3vl_4b__charxiv | 21.7% | **26.7%** | +5.0 | 8.7% | **13.3%** | ✓ |
+| chartgemma__charxiv | 16.1% | **20.0%** | +3.9 | 12.9% | **15.0%** | ✓ |
+| qwen3vl_8b_thinking__chartmuseum | 8.9% | **16.2%** | **+7.3** | 1.4% | **5.0%** | ✓ |
+| chart_r1__chartmuseum | 17.4% | 16.8% | −0.6 | 4.0% | **5.0%** | ✓ |
+| qwen3vl_4b__chartmuseum | 16.2% | **19.3%** | +3.0 | 11.0% | **13.0%** | ✓ |
+| chartgemma__chartmuseum | 50.0% | 0.0% | −50 | 25.0% | 0.0% | n=4 sample noise |
+
+**12-combo mean: 15.5% → 19.2% (+3.7pp)**
+
+### 6.2 Insight 1 — chartqa_pro 가 의외의 OC-VDM sweet spot
+
+qwen3vl_8b_thinking_chartqa_pro 의 PatC% 38.1% 는 **charxiv 의 21.4% 보다 훨씬 높다**. 의미:
+- chartqa_pro 의 open-ended question 은 image-grounding 이 강하게 요구되는 류 (예: "what graph compares between", "what is unanswerable from chart")
+- thinking model 이 reasoning trace 를 생성 + judge LLM 이 semantic match 검출하면 **clean OC-VDM signal**.
+
+→ mini-GRPO 학습에 chartqa_pro thinking-model trajectory 도 적극 포함 권장.
+
+### 6.3 Insight 2 — Positives 보존 확인 (PatC% 단조 증가)
+
+11/12 combo 에서 PatC% 증가 또는 동일. 예외: chartgemma_chartmuseum (n=4 sample noise).
+
+|     | chartqa_pro | charxiv | chartmuseum |
+|---|---|---|---|
+| qwen3vl_8b_thinking | 0 → 38.1% | 18 → 21.4% | 1.4 → 5.0% |
+| chart_r1 | 0 → 33.3% | 11.4 → 13.8% | 4.0 → 5.0% |
+| qwen3vl_4b | 0 (no trace) | 8.7 → 13.3% | 11.0 → 13.0% |
+| chartgemma | 0 (no trace) | 12.9 → 15.0% | 25 → 0 (n=4) |
+
+### 6.4 Insight 3 — Negative target raised most generally on chartqa_pro
+
+**chartqa_pro 가 가장 high-portion negative target** 이었음 (4 combo × 30 = 120 sample 의 100% 가 fake PatA).
+- M2 (judge LLM scoring) 만으로 thinking model 2 combo (60 sample) 의 47.6% / 33.3% 가 informative 으로 회복.
+- Instruct 모델 (60 sample) 은 reasoning trace 부재로 M2 만으로는 해결 못 함 — SFT-warmup 단계 필요.
+
+### 6.5 Insight 4 — chartmuseum thinking 의 신호 회복
+
+OLD informative 8.9% → NEW 16.2% (×1.8). PatC 1.4 → 5.0% (×3.6). 가장 어려웠던 combo 가장 큰 절대량 향상.
+
+조합 효과: F1 (no_cap measurement) + M1 (terminal skip) + M3 (PatB tightening) 모두 기여:
+- F1: hidden Pattern B 가시화 (이전 0.5% → 측정 후 3.4%, 그러나 M3 tighten 후 0%)
+- M1: 25 fake PatA 제거
+- M3: 잘못 분류된 PatB → PatE 강등
+
+### 6.6 결론 — bench-agnostic working achieved (with caveats)
+
+**달성된 것**:
+- 3 bench 중 2 bench (charxiv + chartqa_pro thinking) 에서 informative% > 20% 달성
+- chartmuseum thinking 의 sparse signal 도 PatC ×3.6 회복 (절대 5% 도달)
+- Positives 보존 확인
+
+**남은 caveat**:
+- Instruct 모델 (qwen3vl_4b, chartgemma) 의 chartqa_pro 는 reasoning trace 부재로 적용 불가 — **SFT-warmup 으로 instruct → thinking-style 분포 부여 필수** (mini-GRPO 진행 시)
+- chartgemma 의 chartmuseum 도 step-poor (1% only) — 동일 처방
+
+### 6.7 mini-GRPO 진입 spec (Final)
+
+1. **Policy**: SFT-warmed qwen3vl-4b-instruct (reasoning 분포 부여) 또는 qwen3vl-8b-thinking 직접 GRPO
+2. **Training data routing**:
+   - Quantitative gold (numeric) → outcome + OC-VDM full (Pattern A drop, B 0.3× dampen, C 1.5× up-weight)
+   - Open-ended gold → 동일, 단 scoring 은 judge LLM
+   - Bool gold → outcome-only (step structure 없으면 OC-VDM 비적용)
+3. **Bench scope**: chartqa_pro + charxiv_reasoning + chartmuseum (3 bench 모두; M1+M2+M3 fix 후 모두 informative signal 존재)
+4. **R1-R4 ablation**:
+   - R1: outcome-only GRPO baseline
+   - R2: + Math-Shepherd MC step value
+   - R3: + OC-VDM modulation (M1+M3 classifier, M5 revised modulation)
+   - R4: + sample filter (drop PatA-saturated trajectories)
+
+---
+
+_End of report. Patch 모두 적용 완료, mini-GRPO 진입 준비 완료._
